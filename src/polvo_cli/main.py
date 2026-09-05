@@ -1,6 +1,8 @@
 """polvo CLI — manage the Polvo Model Router.
 
 Wraps `polvoctl.sh` for service lifecycle and provides config management.
+`polvo provider` and `polvo tier` (no subcommand) open interactive wizards;
+their non-interactive subcommands (add/list/remove/set) remain for scripts.
 """
 from __future__ import annotations
 
@@ -16,9 +18,10 @@ from . import __version__
 from .banner import print_banner
 from .config_cmd import list_config, set_tier_model
 from .models_cmd import list_models
-from .setup import run_setup
+from .setup import run_setup, setup_provider, setup_tier
 from .provider_cmd import list as list_providers, add as add_provider, remove as remove_provider
 from .tier_cmd import list as list_tiers, set as set_tier
+from .validate import config_problems
 
 app = typer.Typer(
     name="polvo",
@@ -63,6 +66,18 @@ def _run_polvoctl(*args: str) -> None:
         raise typer.Exit(code=proc.returncode)
 
 
+def _require_ready() -> None:
+    """Abort with a clear message if the config can't start the router."""
+    problems = config_problems()
+    if not problems:
+        return
+    err_console.print("[bold red]Polvo can't start — config is incomplete:[/bold red]")
+    for p in problems:
+        err_console.print(f"  • {p}")
+    err_console.print("\nRun [bold]polvo provider[/bold] and [bold]polvo tier[/bold] to set things up.")
+    raise typer.Exit(code=1)
+
+
 @app.command()
 def version() -> None:
     """Print the CLI version."""
@@ -84,14 +99,27 @@ def setup(
     run_setup(section)
 
 
-# --- Provider Group ---
-provider_app = typer.Typer(help="Manage router providers.")
+# --- Provider Group ---------------------------------------------------------
+# `polvo provider` with no subcommand opens the interactive wizard.
+def _provider_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        setup_provider()
+
+
+provider_app = typer.Typer(
+    help="Manage router providers (interactive wizard with no subcommand).",
+    invoke_without_command=True,
+    callback=_provider_callback,
+    no_args_is_help=False,
+)
 app.add_typer(provider_app, name="provider")
+
 
 @provider_app.command("list")
 def provider_list() -> None:
     """List all configured providers."""
     list_providers()
+
 
 @provider_app.command("add")
 def provider_add(
@@ -103,20 +131,35 @@ def provider_add(
     """Add or update a provider endpoint."""
     add_provider(name, base_url, api_key, api_key_env)
 
+
 @provider_app.command("remove")
 def provider_remove(name: str):
     """Remove a provider endpoint."""
     remove_provider(name)
 
 
-# --- Tier Group ---
-tier_app = typer.Typer(help="Manage router tiers.")
+# --- Tier Group -------------------------------------------------------------
+# `polvo tier` (and alias `polvo tiers`) with no subcommand opens the wizard.
+def _tier_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        setup_tier()
+
+
+tier_app = typer.Typer(
+    help="Manage router tiers (interactive wizard with no subcommand).",
+    invoke_without_command=True,
+    callback=_tier_callback,
+    no_args_is_help=False,
+)
 app.add_typer(tier_app, name="tier")
+app.add_typer(tier_app, name="tiers", hidden=True)  # plural alias (funcional, oculto no help)
+
 
 @tier_app.command("list")
 def tier_list() -> None:
     """List all configured tiers."""
     list_tiers()
+
 
 @tier_app.command("set")
 def tier_set(
@@ -130,7 +173,7 @@ def tier_set(
     set_tier(tier_key, model, provider, name, effort)
 
 
-# --- Legacy/Alias Config ---
+# --- Legacy/Alias Config ----------------------------------------------------
 @app.command()
 def config(
     action: str = typer.Argument(..., help="'list' or 'set'"),
@@ -160,7 +203,8 @@ def models(
 
 @app.command()
 def start() -> None:
-    """Start the Polvo router service."""
+    """Start the Polvo router service (validates config first)."""
+    _require_ready()
     _run_polvoctl("start")
 
 
@@ -169,6 +213,7 @@ def install(
     port: int = typer.Option(9000, "--port", "-p", help="Port to run the router on"),
 ) -> None:
     """Generate the service config and load it (start at login)."""
+    _require_ready()
     _run_polvoctl("install", "--port", str(port))
 
 
@@ -187,6 +232,7 @@ def stop() -> None:
 @app.command()
 def restart() -> None:
     """Restart the Polvo router service."""
+    _require_ready()
     _run_polvoctl("restart")
 
 

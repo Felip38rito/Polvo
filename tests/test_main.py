@@ -63,19 +63,25 @@ def test_config_unknown_action(runner: CliRunner):
 
 # --- service lifecycle (via _run_polvoctl stub) ------------------------------
 
-def test_start(runner: CliRunner, patch_polvoctl):
+@pytest.fixture
+def ready(monkeypatch):
+    """Stub config validation so service commands don't read the real config."""
+    monkeypatch.setattr(main, "config_problems", lambda: [])
+
+
+def test_start(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["start"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["start"]]
 
 
-def test_install_with_port(runner: CliRunner, patch_polvoctl):
+def test_install_with_port(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["install", "--port", "9001"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["install", "--port", "9001"]]
 
 
-def test_install_default_port(runner: CliRunner, patch_polvoctl):
+def test_install_default_port(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["install"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["install", "--port", "9000"]]
@@ -93,7 +99,7 @@ def test_stop(runner: CliRunner, patch_polvoctl):
     assert patch_polvoctl == [["stop"]]
 
 
-def test_restart(runner: CliRunner, patch_polvoctl):
+def test_restart(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["restart"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["restart"]]
@@ -148,3 +154,62 @@ def test_find_polvoctl_missing_raises(monkeypatch):
     with pytest.raises(typer.Exit) as exc:
         main._find_polvoctl()
     assert exc.value.exit_code == 1
+
+
+# --- config validation on start ----------------------------------------------
+
+def test_start_blocks_when_config_incomplete(runner: CliRunner, patch_polvoctl, monkeypatch):
+    monkeypatch.setattr(
+        main, "config_problems", lambda: ["No providers configured. Run 'polvo provider' to add one."]
+    )
+    result = runner.invoke(main.app, ["start"])
+    assert result.exit_code == 1
+    assert "can't start" in result.output
+    assert "No providers configured" in result.output
+    assert patch_polvoctl == []  # never reached polvoctl
+
+
+def test_install_blocks_when_config_incomplete(runner: CliRunner, patch_polvoctl, monkeypatch):
+    monkeypatch.setattr(
+        main, "config_problems", lambda: ["No tiers configured. Run 'polvo tier' to add one."]
+    )
+    result = runner.invoke(main.app, ["install"])
+    assert result.exit_code == 1
+    assert "can't start" in result.output
+    assert patch_polvoctl == []
+
+
+# --- provider / tier wizards (no subcommand) ---------------------------------
+
+def test_provider_no_subcommand_opens_wizard(runner: CliRunner, monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(main, "setup_provider", lambda: called.update(n=1))
+    result = runner.invoke(main.app, ["provider"])
+    assert result.exit_code == 0
+    assert called["n"] == 1
+
+
+def test_tier_no_subcommand_opens_wizard(runner: CliRunner, monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(main, "setup_tier", lambda: called.update(n=1))
+    result = runner.invoke(main.app, ["tier"])
+    assert result.exit_code == 0
+    assert called["n"] == 1
+
+
+def test_tiers_plural_alias_opens_wizard(runner: CliRunner, monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(main, "setup_tier", lambda: called.update(n=1))
+    result = runner.invoke(main.app, ["tiers"])
+    assert result.exit_code == 0
+    assert called["n"] == 1
+
+
+def test_provider_subcommand_still_works(runner: CliRunner, monkeypatch):
+    """'polvo provider list' must NOT open the wizard."""
+    called = {"n": 0}
+    monkeypatch.setattr(main, "setup_provider", lambda: called.update(n=1))
+    monkeypatch.setattr(main, "list_providers", lambda: None)
+    result = runner.invoke(main.app, ["provider", "list"])
+    assert result.exit_code == 0
+    assert called["n"] == 0
