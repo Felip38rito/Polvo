@@ -32,7 +32,7 @@ def _model_list_payload(models: "RouterModels") -> dict[str, Any]:
             "id": "adaptive",
             "object": "model",
             "created": 0,
-            "owned_by": "axon",
+            "owned_by": "polvo",
         }
     ]
     for tier in Tier:
@@ -42,7 +42,7 @@ def _model_list_payload(models: "RouterModels") -> dict[str, Any]:
                 "id": spec.name or tier.value,
                 "object": "model",
                 "created": 0,
-                "owned_by": "axon",
+                "owned_by": "polvo",
                 "tier": tier.value,
                 "model": spec.api_id,
             }

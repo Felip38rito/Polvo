@@ -1,4 +1,4 @@
-"""Config management commands for the axon CLI.
+"""Config management commands for the polvo CLI.
 
 View and modify the router config without re-running setup.
 """
@@ -25,7 +25,7 @@ def _load_config(path: Path | None = None) -> dict[str, Any]:
     if not path.exists():
         err_console.print(
             f"[red]No config found at {path}.[/red]\n"
-            "Run [bold]axon setup[/bold] to create one.",
+            "Run [bold]polvo setup[/bold] to create one.",
         )
         raise typer.Exit(code=1)
     try:
@@ -52,7 +52,7 @@ def list_config() -> None:
     tiers = data.get("tiers") or {}
     providers = data.get("providers") or {}
 
-    table = Table(title="Axon Config")
+    table = Table(title="Polvo Config")
     table.add_column("Tier Key", style="bold")
     table.add_column("Custom Name")
     table.add_column("Model ID")

@@ -1,7 +1,7 @@
-"""Interactive setup flow for the Axon Model Router.
+"""Interactive setup flow for the Polvo Model Router.
 
 Guides the user through configuring providers, tiers, and reasoning levels,
-then writes the resulting config to ~/.config/axon/config.yml.
+then writes the resulting config to ~/.config/polvo/config.yml.
 """
 from __future__ import annotations
 
@@ -35,8 +35,8 @@ EXAMPLE_MODELS: dict[Tier, str] = {
 
 
 def config_path() -> Path:
-    """The user config file location: ~/.config/axon/config.yml."""
-    return Path.home() / ".config" / "axon" / "config.yml"
+    """The user config file location: ~/.config/polvo/config.yml."""
+    return Path.home() / ".config" / "polvo" / "config.yml"
 
 
 def _print_roles() -> None:
@@ -47,7 +47,7 @@ def _print_roles() -> None:
     console.print(
         Panel(
             "\n".join(lines),
-            title="Axon Tiers",
+            title="Polvo Tiers",
             subtitle="Each request is routed to the cheapest adequate tier",
         )
     )
@@ -94,7 +94,7 @@ def _prompt_tiers() -> dict[Tier, dict[str, Any]]:
     """Collect tier names and model ids (Omakase vs Custom flow)."""
     _print_roles()
     omakase = Confirm.ask(
-        "Use Axon Omakase (author's recommended defaults)?",
+        "Use Polvo Omakase (author's recommended defaults)?",
         default=True,
     )
 
@@ -196,7 +196,7 @@ def run_setup() -> None:
     """Run the interactive setup and write the config file."""
     console.print(
         Panel(
-            "[bold]Axon Setup[/bold]\n"
+            "[bold]Polvo Setup[/bold]\n"
             "Configure your model router: providers, tiers, and reasoning levels.",
             border_style="green",
         )
@@ -213,4 +213,4 @@ def run_setup() -> None:
     path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
 
     console.print(f"\n[green]✅ Config written to {path}[/green]")
-    console.print("Run [bold]axon start[/bold] to launch the router.")
+    console.print("Run [bold]polvo start[/bold] to launch the router.")

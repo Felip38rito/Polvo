@@ -1,6 +1,6 @@
-"""axon CLI — manage the Axon Model Router.
+"""polvo CLI — manage the Polvo Model Router.
 
-Wraps `axonctl.sh` for service lifecycle and provides config management.
+Wraps `polvoctl.sh` for service lifecycle and provides config management.
 """
 from __future__ import annotations
 
@@ -16,38 +16,38 @@ from .config_cmd import list_config, set_tier_model
 from .setup import run_setup
 
 app = typer.Typer(
-    name="axon",
-    help="Manage the Axon Model Router: service lifecycle, setup, and config.",
+    name="polvo",
+    help="Manage the Polvo Model Router: service lifecycle, setup, and config.",
     no_args_is_help=True,
 )
 console = Console()
 # Console that writes to stderr, for error messages.
 err_console = Console(stderr=True)
 
-# Repo root: src/axon_cli/main.py -> src -> repo root.
-# Prefer stable home (~/.axon), fallback to local repo structure.
-STABLE_HOME = Path.home() / ".axon"
+# Repo root: src/polvo_cli/main.py -> src -> repo root.
+# Prefer stable home (~/.polvo), fallback to local repo structure.
+STABLE_HOME = Path.home() / ".polvo"
 REPO_DIR = STABLE_HOME if STABLE_HOME.exists() else Path(__file__).resolve().parents[2]
-AXONCTL = REPO_DIR / "axonctl.sh"
+POLVOCTL = REPO_DIR / "polvoctl.sh"
 
 
-def _find_axonctl() -> Path:
-    """Locate axonctl.sh: prefer the repo copy, else a PATH-installed one."""
-    if AXONCTL.exists():
-        return AXONCTL
-    found = shutil.which("axonctl")
+def _find_polvoctl() -> Path:
+    """Locate polvoctl.sh: prefer the repo copy, else a PATH-installed one."""
+    if POLVOCTL.exists():
+        return POLVOCTL
+    found = shutil.which("polvoctl")
     if found:
         return Path(found)
     err_console.print(
-        "[red]axonctl.sh not found.[/red] "
-        f"Expected at {AXONCTL} or on PATH.",
+        "[red]polvoctl.sh not found.[/red] "
+        f"Expected at {POLVOCTL} or on PATH.",
     )
     raise typer.Exit(code=1)
 
 
-def _run_axonctl(*args: str) -> None:
-    """Proxy a command to axonctl.sh, streaming its output."""
-    script = _find_axonctl()
+def _run_polvoctl(*args: str) -> None:
+    """Proxy a command to polvoctl.sh, streaming its output."""
+    script = _find_polvoctl()
     try:
         proc = subprocess.run(
             [str(script), *args],
@@ -63,7 +63,7 @@ def _run_axonctl(*args: str) -> None:
 @app.command()
 def version() -> None:
     """Print the CLI version."""
-    console.print(f"axon {__version__}")
+    console.print(f"polvo {__version__}")
 
 
 @app.command()
@@ -84,7 +84,7 @@ def config(
     elif action == "set":
         if not tier or not model:
             err_console.print(
-                "[red]Usage: axon config set <tier> --model <id>[/red]",
+                "[red]Usage: polvo config set <tier> --model <id>[/red]",
             )
             raise typer.Exit(code=1)
         set_tier_model(tier, model)
@@ -97,8 +97,8 @@ def config(
 
 @app.command()
 def start() -> None:
-    """Start the Axon router service."""
-    _run_axonctl("start")
+    """Start the Polvo router service."""
+    _run_polvoctl("start")
 
 
 @app.command()
@@ -106,43 +106,43 @@ def install(
     port: int = typer.Option(9000, "--port", "-p", help="Port to run the router on"),
 ) -> None:
     """Generate the service config and load it (start at login)."""
-    _run_axonctl("install", "--port", str(port))
+    _run_polvoctl("install", "--port", str(port))
 
 
 @app.command()
 def uninstall() -> None:
     """Stop and remove the service config."""
-    _run_axonctl("uninstall")
+    _run_polvoctl("uninstall")
 
 
 @app.command()
 def stop() -> None:
-    """Stop the Axon router service."""
-    _run_axonctl("stop")
+    """Stop the Polvo router service."""
+    _run_polvoctl("stop")
 
 
 @app.command()
 def restart() -> None:
-    """Restart the Axon router service."""
-    _run_axonctl("restart")
+    """Restart the Polvo router service."""
+    _run_polvoctl("restart")
 
 
 @app.command()
 def status() -> None:
-    """Show whether the Axon router service is running."""
-    _run_axonctl("status")
+    """Show whether the Polvo router service is running."""
+    _run_polvoctl("status")
 
 
 @app.command()
 def logs() -> None:
     """Print the last 100 lines of router logs."""
-    _run_axonctl("logs")
+    _run_polvoctl("logs")
 
 
 @app.command()
 def tail() -> None:
     """Follow the router logs live."""
-    _run_axonctl("tail")
+    _run_polvoctl("tail")
 
 
 def main() -> None:

@@ -1,4 +1,4 @@
-# Axon
+# Polvo
 
 A local **OpenAI-compatible** proxy that routes each chat request to the
 cheapest model that can handle the task. It keeps the expensive models
@@ -9,9 +9,9 @@ It is **provider-agnostic**: it works with any OpenAI-compatible API (Ollama
 Cloud, local Ollama, OpenAI, OpenRouter, Groq, Together, …). You just set the
 `base_url` + key of your provider and the tier → model mapping.
 
-## Why Axon?
+## Why Polvo?
 
-The problem Axon solves is simple and expensive: **paying for a Pro model to
+The problem Polvo solves is simple and expensive: **paying for a Pro model to
 answer "hello"**.
 
 Without a router, you have two bad choices:
@@ -22,7 +22,7 @@ Without a router, you have two bad choices:
   top-tier price. In an agent (Hermes, OpenCode, Cursor) that makes dozens of
   tool calls per task, that burns credits for nothing.
 
-Axon breaks that trade-off: it **classifies the intent** of each request and
+Polvo breaks that trade-off: it **classifies the intent** of each request and
 routes to the cheapest tier that can handle it. Trivial goes to `mini`,
 day-to-day to `air`, and heavy reasoning only then climbs to `pro`/`ultra`.
 
@@ -67,25 +67,25 @@ answer quality, without wasting tokens on prompts that don't need it.
 
 ## Quick start
 
-Install Axon with a single command (works on macOS and Linux):
+Install Polvo with a single command (works on macOS and Linux):
 
 ```bash
-curl -LsSf https://<your-host>/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Felip38rito/Nexus/main/install.sh | sh
 ```
 
 The installer:
 
 1. Bootstraps `uv` if needed.
-2. Clones the repo into the **stable home** `~/.axon`.
-3. Installs the `axon` CLI globally via `uv tool install` (a real binary in
+2. Clones the repo into the **stable home** `~/.polvo`.
+3. Installs the `polvo` CLI globally via `uv tool install` (a real binary in
    `~/.local/bin` — no PATH hacks).
 4. Installs the background service so the router starts at login.
 
 Then configure your provider and start:
 
 ```bash
-axon setup        # interactive: provider, tiers, reasoning levels
-axon status       # is the router running?
+polvo setup        # interactive: provider, tiers, reasoning levels
+polvo status       # is the router running?
 curl localhost:9000/v1/models
 ```
 
@@ -100,62 +100,62 @@ Tests:
 uv run pytest
 ```
 
-## Using the Axon CLI
+## Using the Polvo CLI
 
-`axon` is a modern CLI for managing the router: guided setup, service
-lifecycle, and config management. It wraps `axonctl.sh` for service commands.
+`polvo` is a modern CLI for managing the router: guided setup, service
+lifecycle, and config management. It wraps `polvoctl.sh` for service commands.
 
-After installing via the script, `axon` is a real binary on your `PATH`
+After installing via the script, `polvo` is a real binary on your `PATH`
 (installed to `~/.local/bin` by `uv tool install`), so it works from any
 directory:
 
 ```bash
-axon version     # confirm it's installed
+polvo version     # confirm it's installed
 ```
 
 ### Guided setup
 
-The first step is usually `axon setup`, which walks you through configuring
+The first step is usually `polvo setup`, which walks you through configuring
 providers, tiers, and reasoning levels interactively:
 
 ```bash
-axon setup
+polvo setup
 ```
 
 It asks for:
 
 1. **Provider** — name, `base_url`, and the env var holding the API key.
-2. **Tiers** — either *Axon Omakase* (recommended defaults) or custom display
+2. **Tiers** — either *Polvo Omakase* (recommended defaults) or custom display
    names, plus the model id for each tier (`mini`/`air`/`pro`/`ultra`).
 3. **Reasoning levels** — optionally attach `extra_params` (e.g.
    `reasoning_effort: high`) to specific tiers.
 
-The result is written to `~/.config/axon/config.yml`, which the router reads
+The result is written to `~/.config/polvo/config.yml`, which the router reads
 automatically.
 
 ### Service lifecycle
 
 ```bash
-axon start      # start the router service
-axon stop       # stop it
-axon restart    # restart it
-axon status     # is it running?
-axon logs       # last 100 lines of logs
-axon tail       # follow logs live
+polvo start      # start the router service
+polvo stop       # stop it
+polvo restart    # restart it
+polvo status     # is it running?
+polvo logs       # last 100 lines of logs
+polvo tail       # follow logs live
 ```
 
 ### Config management
 
 ```bash
-axon config list                 # show tier -> name -> model -> provider
-axon config set pro --model <id> # change a tier's model id
+polvo config list                 # show tier -> name -> model -> provider
+polvo config set pro --model <id> # change a tier's model id
 ```
 
 ### Example
 
 ```bash
-axon setup                       # configure providers + tiers
-axon start                       # launch the router
+polvo setup                       # configure providers + tiers
+polvo start                       # launch the router
 curl localhost:9000/v1/models    # custom names appear here
 ```
 
@@ -184,7 +184,7 @@ Each tier accepts two optional fields:
 - `description`: overrides the classifier's system prompt for that tier. If unset, the built-in description is used.
 - `extra_params`: a mapping of provider-specific parameters (e.g. `reasoning_effort`, `budget_tokens`) merged into the upstream request body for that tier.
 
-Config is resolved from (first match): `ROUTER_MODELS_YAML` env var, `~/.config/axon/config.yml`, `router.models.yaml` in the repo, then built-in defaults.
+Config is resolved from (first match): `ROUTER_MODELS_YAML` env var, `~/.config/polvo/config.yml`, `router.models.yaml` in the repo, then built-in defaults.
 
 ```yaml
 default_tier: air
@@ -314,7 +314,7 @@ classifier:
 ```
 
 > **Note:** Anthropic's native API is **not** OpenAI-compatible (it uses a
-> different request/response shape). To route Anthropic through Axon, use an
+> different request/response shape). To route Anthropic through Polvo, use an
 > OpenAI-compatible gateway in front of it (e.g. OpenRouter, or Anthropic's
 > own `/v1/messages` is not supported directly). The example above assumes an
 > OpenAI-compatible endpoint.
@@ -463,7 +463,7 @@ natively at `/v1/responses` — no bridge needed. Point the Copilot provider at
 the router with environment variables (e.g. in `~/.zshrc`):
 
 ```bash
-# GitHub Copilot CLI -> Axon Model Router
+# GitHub Copilot CLI -> Polvo Model Router
 export COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:9000/v1
 export COPILOT_PROVIDER_API_KEY=router    # router without auth accepts any value
 export COPILOT_MODEL=adaptive             # <-- the router decides the tier per request
@@ -524,17 +524,17 @@ Options:
 | Flag | Default | Description |
 |---|---|---|
 | `--config` | `~/.config/opencode/opencode.jsonc` | OpenCode config to update |
-| `--router-url` | `http://127.0.0.1:9000/v1` | Axon router base URL |
+| `--router-url` | `http://127.0.0.1:9000/v1` | Polvo router base URL |
 | `--dry-run` | off | Show what would change without writing |
 
 > **How to configure the tiers (mini/air/pro/ultra):** the tier *names* come
 > straight from the router's `/v1/models` (edit `router.models.yaml` — see
 > [Model configuration](#model-configuration-yaml) — then restart with
-> `axonctl restart`). Re-run the sync and the OpenCode provider updates to
+> `polvoctl restart`). Re-run the sync and the OpenCode provider updates to
 > match. If the router advertises a new tier, it appears; if one is removed,
 > it disappears from the OpenCode provider too.
 
-> **How to run it correctly:** the router must be up (`axonctl status`)
+> **How to run it correctly:** the router must be up (`polvoctl status`)
 > before syncing. If it's down, the script fails fast with a clear message and
 > leaves your config untouched. To keep OpenCode always in step, run the sync
 > after every router restart (or whenever you change `router.models.yaml`).
@@ -580,24 +580,24 @@ Add a `router` provider in `~/.config/opencode/opencode.jsonc`:
 ## Running as a service
 
 To have the router start at login and restart itself on crash, use a background
-service. The `axonctl` script manages the whole lifecycle and **self-locates**
+service. The `polvoctl` script manages the whole lifecycle and **self-locates**
 — it derives the repo path from its own location, so it works whether you
-installed via the script (repo in `~/.axon`) or cloned it manually.
+installed via the script (repo in `~/.polvo`) or cloned it manually.
 
 After a script install, the service is already set up. You can manage it with
-either the `axon` CLI or `axonctl` directly:
+either the `polvo` CLI or `polvoctl` directly:
 
 ```bash
-axon install       # generate the service config + load it (start at login)
-axon status        # is it running?
-axon restart       # after changing code/config
-axon tail          # follow logs live
-axon uninstall     # stop + remove the service config
+polvo install       # generate the service config + load it (start at login)
+polvo status        # is it running?
+polvo restart       # after changing code/config
+polvo tail          # follow logs live
+polvo uninstall     # stop + remove the service config
 ```
 
 Commands: `install | uninstall | start | stop | restart | status | logs | tail`.
 
-`axonctl` auto-detects the OS and uses the native service manager:
+`polvoctl` auto-detects the OS and uses the native service manager:
 
 - **macOS → launchd**: writes a plist to `~/Library/LaunchAgents/<label>.plist`
   (`RunAtLoad` + `KeepAlive` + `ThrottleInterval=10`; logs in `logs/`).
@@ -605,16 +605,16 @@ Commands: `install | uninstall | start | stop | restart | status | logs | tail`.
   `~/.config/systemd/user/<label>.service` (`Restart=always`; logs via
   `journalctl --user`).
 
-The service label defaults to `axon`; override with `AXON_LABEL`
-(e.g. `AXON_LABEL=com.example.axon axonctl install`).
+The service label defaults to `polvo`; override with `POLVO_LABEL`
+(e.g. `POLVO_LABEL=com.example.polvo polvoctl install`).
 
-`routerctl.sh` is kept as a deprecated alias for `axonctl` so existing
+`routerctl.sh` is kept as a deprecated alias for `polvoctl` so existing
 scripts/aliases keep working.
 
 > **Pitfall (macOS):** launchd doesn't source your `~/.zshrc`, so its minimal
-> PATH can't find `uv` (which usually lives in `~/.local/bin`). `axonctl
+> PATH can't find `uv` (which usually lives in `~/.local/bin`). `polvoctl
 > install` auto-detects the `uv` directory and bakes it into the plist's
-> `EnvironmentVariables.PATH`. If you move `uv`, re-run `axonctl install`.
+> `EnvironmentVariables.PATH`. If you move `uv`, re-run `polvoctl install`.
 
 ## Security
 

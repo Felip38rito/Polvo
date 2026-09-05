@@ -1,4 +1,4 @@
-"""Tests for sync-opencode.py — the Axon → OpenCode model sync.
+"""Tests for sync-opencode.py — the Polvo → OpenCode model sync.
 
 Verifies the non-destructive guarantees that matter:
 - Only the `router` provider's `models` VALUE is rewritten.

@@ -105,7 +105,7 @@ def test_load_models_yaml_missing_tier_raises(tmp_path: Path):
 def test_settings_from_env_loads_yaml(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
     monkeypatch.delenv("ROUTER_MODELS_YAML", raising=False)
-    # Isolate Path.home so a real ~/.config/axon/config.yml can't interfere.
+    # Isolate Path.home so a real ~/.config/polvo/config.yml can't interfere.
     import pathlib
     monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
     yaml_path = tmp_path / "models.yaml"
@@ -270,7 +270,7 @@ def test_from_env_prefers_user_config_over_repo(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("ROUTER_MODELS_YAML", raising=False)
     
     # Setup user config dir and file
-    user_config_dir = tmp_path / ".config" / "axon"
+    user_config_dir = tmp_path / ".config" / "polvo"
     user_config_dir.mkdir(parents=True)
     user_cfg = user_config_dir / "config.yml"
     user_cfg.write_text(

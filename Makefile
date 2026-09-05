@@ -1,4 +1,4 @@
-# Makefile for Axon model router
+# Makefile for Polvo model router
 # Provides common development and management commands.
 
 .PHONY: install test restart status logs clean setup-dev
@@ -10,13 +10,13 @@ test:
 	uv run pytest
 
 restart:
-	./axonctl restart
+	./polvoctl restart
 
 status:
-	./axonctl status
+	./polvoctl status
 
 logs:
-	./axonctl logs
+	./polvoctl logs
 
 clean:
 	rm -f logs/*.log

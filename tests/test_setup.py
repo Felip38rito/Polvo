@@ -1,11 +1,11 @@
-"""Tests for the axon setup flow (config.yml generation)."""
+"""Tests for the polvo setup flow (config.yml generation)."""
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
 
-from axon_cli import setup
+from polvo_cli import setup
 from model_router.models import Tier
 
 

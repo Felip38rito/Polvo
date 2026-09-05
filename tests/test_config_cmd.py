@@ -1,4 +1,4 @@
-"""Tests for the axon CLI config commands (config_cmd.py)."""
+"""Tests for the polvo CLI config commands (config_cmd.py)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,7 +7,7 @@ import pytest
 import typer
 import yaml
 
-from axon_cli import config_cmd
+from polvo_cli import config_cmd
 
 
 @pytest.fixture
@@ -92,7 +92,7 @@ def test_save_config_writes_file(tmp_path: Path):
 def test_list_config_prints_table(patch_config_path, capsys):
     config_cmd.list_config()
     out = capsys.readouterr().out
-    assert "Axon Config" in out
+    assert "Polvo Config" in out
     assert "deepseek-v4-pro:0813" in out
     assert "kimi-k3" in out
 

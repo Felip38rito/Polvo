@@ -1,5 +1,5 @@
 [project]
-name = "axon"
+name = "polvo"
 version = "0.1.0"
 description = "Local OpenAI-compatible proxy that routes each request to the cheapest adequate Ollama Cloud model."
 requires-python = ">=3.11"
@@ -17,7 +17,7 @@ dependencies = [
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.scripts]
-axon = "axon_cli.main:main"
+polvo = "polvo_cli.main:main"
 
 [tool.uv]
 package = true

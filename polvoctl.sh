@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# axonctl — manage the Axon Model Router as a background service.
+# polvoctl — manage the Polvo Model Router as a background service.
 #
 # Supports macOS (launchd) and Linux (systemd).
 # Self-locating: derives the repo path from its own location.
 #
-#   export PATH="$PATH:/path/to/axon-repo"
-#   axonctl install    # generate + load the service
-#   axonctl status
-#   axonctl restart
+#   export PATH="$PATH:/path/to/polvo-repo"
+#   polvoctl install    # generate + load the service
+#   polvoctl status
+#   polvoctl restart
 #
-# The service label defaults to "axon"; override with AXON_LABEL.
+# The service label defaults to "polvo"; override with POLVO_LABEL.
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 
 # --- Config ----------------------------------------------------------------
-LABEL="${AXON_LABEL:-axon}"
+LABEL="${POLVO_LABEL:-polvo}"
 DOMAIN="gui/$(id -u)"
 RUN_SH="$REPO_DIR/run.sh"
 PORT="${ROUTER_PORT:-9000}"
@@ -42,7 +42,7 @@ LOG_ERR="$REPO_DIR/logs/router.err.log"
 
 usage() {
     cat <<EOF
-Usage: axonctl [--port N] [--label NAME] <command>
+Usage: polvoctl [--port N] [--label NAME] <command>
 
 Commands:
   install     Generate the service config and load it
@@ -56,9 +56,9 @@ Commands:
 
 Flags:
   --port N     Override the router port (default: 9000)
-  --label NAME Override the service label (default: axon)
+  --label NAME Override the service label (default: polvo)
 
-The service label defaults to "axon". Override with AXON_LABEL.
+The service label defaults to "polvo". Override with POLVO_LABEL.
 EOF
     exit 1
 }
@@ -124,16 +124,16 @@ _mac_uninstall() {
 
 _mac_start() {
     if launchctl list "$LABEL" &>/dev/null; then
-        echo "ℹ️  Axon already running."
+        echo "ℹ️  Polvo already running."
     else
-        echo "🚀 Starting Axon (launchd)..."
+        echo "🚀 Starting Polvo (launchd)..."
         launchctl bootstrap "$DOMAIN" "$PLIST"
     fi
 }
 
 _mac_stop() {
     if launchctl list "$LABEL" &>/dev/null; then
-        echo "🛑 Stopping Axon..."
+        echo "🛑 Stopping Polvo..."
         launchctl bootout "$DOMAIN/$LABEL" || true
     fi
 }
@@ -142,20 +142,20 @@ _mac_restart() {
     # kickstart -k kills and restarts atomically, avoiding the stop/start
     # race where `launchctl list` still shows the label right after bootout.
     if launchctl list "$LABEL" &>/dev/null; then
-        echo "🔄 Restarting Axon (launchd)..."
+        echo "🔄 Restarting Polvo (launchd)..."
         launchctl kickstart -k "$DOMAIN/$LABEL"
     else
-        echo "🚀 Axon not running — starting it..."
+        echo "🚀 Polvo not running — starting it..."
         launchctl bootstrap "$DOMAIN" "$PLIST"
     fi
 }
 
 _mac_status() {
     if launchctl list "$LABEL" &>/dev/null; then
-        echo "🔍 Axon is running (label $LABEL):"
+        echo "🔍 Polvo is running (label $LABEL):"
         launchctl list "$LABEL"
     else
-        echo "🔍 Axon is NOT running."
+        echo "🔍 Polvo is NOT running."
     fi
 }
 
@@ -164,7 +164,7 @@ _lin_install() {
     mkdir -p "$HOME/.config/systemd/user" "$REPO_DIR/logs"
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Axon Model Router
+Description=Polvo Model Router
 After=network.target
 
 [Service]
@@ -193,21 +193,21 @@ _lin_uninstall() {
 }
 
 _lin_start() {
-    echo "🚀 Starting Axon (systemd)..."
+    echo "🚀 Starting Polvo (systemd)..."
     systemctl --user start "$LABEL.service"
 }
 
 _lin_stop() {
-    echo "🛑 Stopping Axon..."
+    echo "🛑 Stopping Polvo..."
     systemctl --user stop "$LABEL.service"
 }
 
 _lin_status() {
     if systemctl --user is-active --quiet "$LABEL.service"; then
-        echo "🔍 Axon is running (label $LABEL):"
+        echo "🔍 Polvo is running (label $LABEL):"
         systemctl --user status "$LABEL.service"
     else
-        echo "🔍 Axon is NOT running."
+        echo "🔍 Polvo is NOT running."
     fi
 }
 

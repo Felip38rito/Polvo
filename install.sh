@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# install.sh - Bootstrap installer for Axon model router
+# install.sh - Bootstrap installer for Polvo model router
 # Supports remote execution: curl -LsSf https://.../install.sh | sh
 
 set -euo pipefail
 
 # --- Configuration ---
-# Overridable via env for CI/testing: AXON_REPO_URL, AXON_STABLE_HOME, AXON_REF.
-STABLE_HOME="${AXON_STABLE_HOME:-$HOME/.axon}"
-REPO_URL="${AXON_REPO_URL:-https://github.com/Felip38rito/Axon}"
-AXON_REF="${AXON_REF:-stable}"
+# Overridable via env for CI/testing: POLVO_REPO_URL, POLVO_STABLE_HOME, POLVO_REF.
+STABLE_HOME="${POLVO_STABLE_HOME:-$HOME/.polvo}"
+REPO_URL="${POLVO_REPO_URL:-https://github.com/Felip38rito/Polvo}"
+POLVO_REF="${POLVO_REF:-stable}"
 DEFAULT_PORT=9000
 PORT="$DEFAULT_PORT"
 NO_SERVICE=false
@@ -75,23 +75,23 @@ ensure_uv() {
 # Clone or update the repo in the stable home
 setup_repo() {
     if [ -d "$STABLE_HOME/.git" ]; then
-        log "Axon already exists in $STABLE_HOME. Updating..."
-        (cd "$STABLE_HOME" && git fetch --tags && git checkout "$AXON_REF")
+        log "Polvo already exists in $STABLE_HOME. Updating..."
+        (cd "$STABLE_HOME" && git fetch --tags && git checkout "$POLVO_REF")
     else
-        log "Cloning Axon ($AXON_REF) to $STABLE_HOME..."
+        log "Cloning Polvo ($POLVO_REF) to $STABLE_HOME..."
         # If REPO_URL is a local file path (CI mode), we clone without specifying a branch
         # to avoid errors if the tag 'stable' doesn't exist in the temp dir.
         if [[ "$REPO_URL" == file://* ]]; then
             git clone "$REPO_URL" "$STABLE_HOME"
         else
-            git clone -b "$AXON_REF" "$REPO_URL" "$STABLE_HOME"
+            git clone -b "$POLVO_REF" "$REPO_URL" "$STABLE_HOME"
         fi
     fi
 }
 
 # Install the CLI tool globally via uv
 install_cli() {
-    log "Installing axon CLI tool..."
+    log "Installing polvo CLI tool..."
     uv tool install "$STABLE_HOME"
 }
 
@@ -102,14 +102,14 @@ install_service() {
         return
     fi
     log "Installing background service on port $PORT..."
-    # Use the axon CLI we just installed to trigger the service setup
-    axon install --port "$PORT"
+    # Use the polvo CLI we just installed to trigger the service setup
+    polvo install --port "$PORT"
 }
 
 main() {
     parse_args "$@"
     prompt_port
-    log "Starting Axon bootstrap installation..."
+    log "Starting Polvo bootstrap installation..."
     
     ensure_uv
     setup_repo
@@ -118,18 +118,18 @@ main() {
     
     echo
     echo "=================================================="
-    echo " Axon installation complete"
+    echo " Polvo installation complete"
     echo "=================================================="
     echo " Stable Home: $STABLE_HOME"
     echo " Port:        $PORT"
-    echo " CLI:         axon (available in your PATH)"
+    echo " CLI:         polvo (available in your PATH)"
     echo " Service:    $([ $NO_SERVICE = true ] && echo 'not installed (--no-service)' || echo 'installed and running')"
     echo
     echo " Usage:"
-    echo "   axon status    - Check service status"
-    echo "   axon restart   - Restart service"
-    echo "   axon logs      - View logs"
-    echo "   axon setup     - Interactive configuration"
+    echo "   polvo status    - Check service status"
+    echo "   polvo restart   - Restart service"
+    echo "   polvo logs      - View logs"
+    echo "   polvo setup     - Interactive configuration"
     echo "=================================================="
 }
 

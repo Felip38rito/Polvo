@@ -158,13 +158,13 @@ class Settings:
         require_auth = os.environ.get("ROUTER_API_KEY", "").strip()
 
         # Load models YAML: explicit ROUTER_MODELS_YAML wins, else the
-        # user config in ~/.config/axon/config.yml, else the project
+        # user config in ~/.config/polvo/config.yml, else the project
         # default file, else built-in defaults.
         yaml_path_raw = os.environ.get("ROUTER_MODELS_YAML", "").strip()
         if yaml_path_raw:
             yaml_path: Path | None = Path(yaml_path_raw)
         else:
-            user_cfg = Path.home() / ".config" / "axon" / "config.yml"
+            user_cfg = Path.home() / ".config" / "polvo" / "config.yml"
             if user_cfg.exists():
                 yaml_path = user_cfg
             else:
