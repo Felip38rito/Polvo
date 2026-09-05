@@ -4,6 +4,7 @@ from typing import Any
 # The fixed axis of adaptive tiers. Order matters for default_tier derivation.
 ADAPTIVE_TIERS = ("mini", "air", "pro", "ultra")
 
+
 @dataclass(frozen=True)
 class ProviderSpec:
     """A named upstream endpoint a tier (or the classifier) can point at.
@@ -19,8 +20,8 @@ class ProviderSpec:
 
     def resolve_api_key(self, fallback: str | None = None) -> str:
         """Resolve the API key from inline value, environment variable, or a provided fallback.
-        
-        Raises RuntimeError if both inline and env var are set (ambiguity), 
+
+        Raises RuntimeError if both inline and env var are set (ambiguity),
         or if no key is found at all.
         """
         import os
@@ -30,11 +31,12 @@ class ProviderSpec:
 
         if inline and env_val:
             raise RuntimeError(f"Ambiguous API key for provider: both inline and env var '{env_var}' are set.")
-        
+
         res = env_val or inline or fallback
         if res is None:
             raise RuntimeError(f"No API key found for provider: inline is empty, env var '{env_var}' is not set, and no fallback provided.")
         return res
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -51,12 +53,19 @@ class ModelSpec:
     # budget_tokens) merged into the upstream request body for this tier.
     extra_params: dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass(frozen=True)
 class RouterModels:
-    """Mounted model table + classifier config for the running router."""
+    """Mounted model table + classifier config for the running router.
+
+    ``tiers`` is the unified dict of ALL configured models (adaptive + custom),
+    keyed by tier key. ``custom_models`` mirrors the custom subset so callers
+    can distinguish the two groups without re-deriving.
+    """
 
     tiers: dict[str, ModelSpec] = field(default_factory=dict)
-    default_tier: str = "air"
+    custom_models: dict[str, ModelSpec] = field(default_factory=dict)
+    default_tier: str | None = "air"
     classifier_model: str = "gemma4:31b"
     # Which named provider serves the classifier (defaults to "default").
     classifier_provider: str = "default"
@@ -65,7 +74,10 @@ class RouterModels:
     providers: dict[str, ProviderSpec] = field(default_factory=dict)
 
     def tier_for_alias(self, alias: str) -> str | None:
-        """Resolve a model id, display name, or tier key to a tier key."""
+        """Resolve a model id, display name, or tier key to a tier key.
+
+        Covers both adaptive and custom models.
+        """
         for tier_key, spec in self.tiers.items():
             if spec.api_id == alias or (spec.name and spec.name == alias) or tier_key == alias:
                 return tier_key
@@ -84,3 +96,11 @@ class RouterModels:
     def is_adaptive(self, tier_key: str) -> bool:
         """True if the tier is one of the 4 adaptive ones."""
         return tier_key in ADAPTIVE_TIERS
+
+    def is_custom(self, tier_key: str) -> bool:
+        """True if the tier is a custom (non-adaptive) model."""
+        return tier_key in self.custom_models
+
+    def has_adaptive(self) -> bool:
+        """True if at least one adaptive tier is configured."""
+        return bool(self.adaptive_tiers())

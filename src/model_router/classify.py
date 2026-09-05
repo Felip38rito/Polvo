@@ -77,7 +77,7 @@ def deterministic_tier(prompt: str, min_classify_len: int = 10, models: RouterMo
         return override
 
     # 2. Trivial chatter: too short to be a real task.
-    if len(prompt) < min_classify_len:
+    if len(prompt) < min_classify_len and models.default_tier is not None:
         return models.default_tier
 
     # 3. Defer to the LLM for the qualitative decision.
@@ -265,4 +265,6 @@ async def classify(
     )
     if llm is not None:
         return llm
+    if settings.models.default_tier is None:
+        raise RuntimeError("Classifier failed and no adaptive tier is configured to fall back to.")
     return settings.models.default_tier

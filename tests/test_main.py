@@ -40,7 +40,7 @@ def test_version(runner: CliRunner):
 def test_config_list(runner: CliRunner, monkeypatch, tmp_path: Path):
     cfg = tmp_path / "config.yml"
     cfg.write_text(
-        "tiers:\n  mini:\n    model: gemma4:31b\n  air:\n    model: x\n"
+        "adaptive:\n  mini:\n    model: gemma4:31b\n  air:\n    model: x\n"
         "  pro:\n    model: y\n  ultra:\n    model: z\n"
     )
     monkeypatch.setattr(config_cmd, "config_path", lambda: cfg)
@@ -64,7 +64,7 @@ def test_config_unknown_action(runner: CliRunner):
 def test_config_no_action_lists(runner: CliRunner, monkeypatch, tmp_path: Path):
     """'polvo config' with no action should list, not error."""
     cfg = tmp_path / "config.yml"
-    cfg.write_text("tiers:\n  mini:\n    model: gemma4:31b\n")
+    cfg.write_text("adaptive:\n  mini:\n    model: gemma4:31b\n")
     monkeypatch.setattr(config_cmd, "config_path", lambda: cfg)
     result = runner.invoke(main.app, ["config"])
     assert result.exit_code == 0

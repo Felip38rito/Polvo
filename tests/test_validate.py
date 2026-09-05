@@ -20,15 +20,15 @@ def test_missing_config_returns_none(tmp_path: Path):
 
 def test_invalid_yaml_returns_none(tmp_path: Path):
     p = tmp_path / "bad.yml"
-    p.write_text("tiers: [unclosed")
+    p.write_text("adaptive: [unclosed")
     assert validate.load_config(p) is None
 
 
 def test_empty_config_problems(tmp_path: Path):
-    p = _write(tmp_path, {"providers": {}, "tiers": {}})
+    p = _write(tmp_path, {"providers": {}, "adaptive": {}, "custom": {}})
     problems = validate.config_problems(p)
     assert any("No providers" in x for x in problems)
-    assert any("No tiers" in x for x in problems)
+    assert any("No models" in x for x in problems)
     assert any("Classifier" in x for x in problems)
 
 
@@ -38,11 +38,11 @@ def test_missing_config_problems(tmp_path: Path):
     assert "No config found" in problems[0]
 
 
-def test_providers_only_missing_tiers_and_classifier(tmp_path: Path):
+def test_providers_only_missing_models_and_classifier(tmp_path: Path):
     p = _write(tmp_path, {"providers": {"A": {"base_url": "https://x/v1"}}})
     problems = validate.config_problems(p)
     assert not any("No providers" in x for x in problems)
-    assert any("No tiers" in x for x in problems)
+    assert any("No models" in x for x in problems)
     assert any("Classifier" in x for x in problems)
 
 
@@ -51,7 +51,21 @@ def test_complete_config_ready(tmp_path: Path):
         tmp_path,
         {
             "providers": {"A": {"base_url": "https://x/v1", "api_key_env": "K"}},
-            "tiers": {"mini": {"model": "m", "provider": "A"}},
+            "adaptive": {"mini": {"model": "m", "provider": "A"}},
+            "classifier": {"model": "m", "provider": "A"},
+        },
+    )
+    assert validate.config_problems(p) == []
+    assert validate.is_ready(p) is True
+
+
+def test_custom_only_config_ready(tmp_path: Path):
+    """A config with only custom models is valid (no adaptive required)."""
+    p = _write(
+        tmp_path,
+        {
+            "providers": {"A": {"base_url": "https://x/v1", "api_key_env": "K"}},
+            "custom": {"meu-modelo": {"model": "m", "provider": "A"}},
             "classifier": {"model": "m", "provider": "A"},
         },
     )
@@ -64,7 +78,7 @@ def test_classifier_without_model_not_ready(tmp_path: Path):
         tmp_path,
         {
             "providers": {"A": {"base_url": "https://x/v1"}},
-            "tiers": {"mini": {"model": "m", "provider": "A"}},
+            "adaptive": {"mini": {"model": "m", "provider": "A"}},
             "classifier": {"provider": "A"},
         },
     )

@@ -21,22 +21,22 @@ def test_config_path_points_to_user_config(monkeypatch):
 
 def test_load_config_missing_returns_empty(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(setup, "config_path", lambda: tmp_path / "nope.yml")
-    assert setup._load_config() == {"providers": {}, "tiers": {}}
+    assert setup._load_config() == {"providers": {}, "adaptive": {}, "custom": {}}
 
 
 def test_load_config_invalid_yaml_returns_empty(monkeypatch, tmp_path: Path):
     bad = tmp_path / "bad.yml"
-    bad.write_text("tiers: [unclosed")
+    bad.write_text("adaptive: [unclosed")
     monkeypatch.setattr(setup, "config_path", lambda: bad)
-    assert setup._load_config() == {"providers": {}, "tiers": {}}
+    assert setup._load_config() == {"providers": {}, "adaptive": {}, "custom": {}}
 
 
 def test_save_config_writes_yaml(monkeypatch, tmp_path: Path):
     target = tmp_path / "config.yml"
     monkeypatch.setattr(setup, "config_path", lambda: target)
-    setup._save_config({"providers": {}, "tiers": {}})
+    setup._save_config({"providers": {}, "adaptive": {}, "custom": {}})
     assert target.exists()
-    assert yaml.safe_load(target.read_text()) == {"providers": {}, "tiers": {}}
+    assert yaml.safe_load(target.read_text()) == {"providers": {}, "adaptive": {}, "custom": {}}
 
 
 # --- _required_prompt --------------------------------------------------------
@@ -107,7 +107,7 @@ def test_setup_provider_inline_key(monkeypatch, tmp_path: Path):
 def test_setup_tier_requires_existing_provider(monkeypatch, tmp_path: Path):
     """With no providers, tier setup must bail and tell the user to add one first."""
     target = tmp_path / "config.yml"
-    target.write_text(yaml.safe_dump({"providers": {}, "tiers": {}}))
+    target.write_text(yaml.safe_dump({"providers": {}, "adaptive": {}, "custom": {}}))
     monkeypatch.setattr(setup, "config_path", lambda: target)
 
     # If we reach an action prompt, the guard failed. No actions should be asked.
@@ -121,18 +121,20 @@ def test_setup_tier_requires_existing_provider(monkeypatch, tmp_path: Path):
     # We should never have prompted for an action (guard bails immediately).
     assert calls["n"] == 0
     data = yaml.safe_load(target.read_text())
-    assert data["tiers"] == {}
+    assert data["adaptive"] == {}
+    assert data["custom"] == {}
 
 
-def test_setup_tier_adds_with_existing_provider(monkeypatch, tmp_path: Path):
+def test_setup_tier_adds_adaptive_with_existing_provider(monkeypatch, tmp_path: Path):
     target = tmp_path / "config.yml"
     target.write_text(yaml.safe_dump({
         "providers": {"Cloud": {"base_url": "https://cloud.com/v1", "api_key_env": "K"}},
-        "tiers": {},
+        "adaptive": {},
+        "custom": {},
     }))
     monkeypatch.setattr(setup, "config_path", lambda: target)
 
-    action_answers = iter(["add", "done"])
+    action_answers = iter(["adaptive", "done"])
     prompt_answers = iter(["pro", "Cloud", "my-pro-model", "Pro Tier"])
 
     def fake_ask(prompt, *a, **k):
@@ -146,9 +148,35 @@ def test_setup_tier_adds_with_existing_provider(monkeypatch, tmp_path: Path):
 
     setup.setup_tier()
     data = yaml.safe_load(target.read_text())
-    assert data["tiers"]["pro"]["model"] == "my-pro-model"
-    assert data["tiers"]["pro"]["provider"] == "Cloud"
-    assert data["tiers"]["pro"]["name"] == "Pro Tier"
+    assert data["adaptive"]["pro"]["model"] == "my-pro-model"
+    assert data["adaptive"]["pro"]["provider"] == "Cloud"
+    assert data["adaptive"]["pro"]["name"] == "Pro Tier"
+
+
+def test_setup_tier_adds_custom_with_existing_provider(monkeypatch, tmp_path: Path):
+    target = tmp_path / "config.yml"
+    target.write_text(yaml.safe_dump({
+        "providers": {"Cloud": {"base_url": "https://cloud.com/v1", "api_key_env": "K"}},
+        "adaptive": {},
+        "custom": {},
+    }))
+    monkeypatch.setattr(setup, "config_path", lambda: target)
+
+    action_answers = iter(["custom", "done"])
+    prompt_answers = iter(["meu-modelo", "Cloud", "my-custom-model", "Meu Modelo"])
+
+    def fake_ask(prompt, *a, **k):
+        if "Action" in prompt:
+            return next(action_answers)
+        return next(prompt_answers)
+
+    monkeypatch.setattr(setup.Prompt, "ask", fake_ask)
+    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: False)
+
+    setup.setup_tier()
+    data = yaml.safe_load(target.read_text())
+    assert data["custom"]["meu-modelo"]["model"] == "my-custom-model"
+    assert data["custom"]["meu-modelo"]["provider"] == "Cloud"
 
 
 # --- run_setup ---------------------------------------------------------------

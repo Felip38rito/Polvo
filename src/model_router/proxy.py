@@ -26,16 +26,22 @@ router = APIRouter()
 
 
 def _model_list_payload(models: "RouterModels") -> dict[str, Any]:
-    """Advertise the virtual + tier model ids the router understands."""
-    data = [
-        {
-            "id": "adaptive",
-            "object": "model",
-            "created": 0,
-            "owned_by": "polvo",
-        }
-    ]
-    # Advertise all configured tiers (adaptive + extras)
+    """Advertise the virtual + model ids the router understands.
+
+    Always advertises the 'adaptive' virtual model (if any adaptive tier is
+    configured) plus every configured model (adaptive + custom), tagged by type.
+    """
+    data = []
+    if models.has_adaptive():
+        data.append(
+            {
+                "id": "adaptive",
+                "object": "model",
+                "created": 0,
+                "owned_by": "polvo",
+                "type": "adaptive",
+            }
+        )
     for tier_key, spec in models.tiers.items():
         data.append(
             {
@@ -45,6 +51,7 @@ def _model_list_payload(models: "RouterModels") -> dict[str, Any]:
                 "owned_by": "polvo",
                 "tier": tier_key,
                 "model": spec.api_id,
+                "type": "adaptive" if models.is_adaptive(tier_key) else "custom",
             }
         )
     return {"object": "list", "data": data}
@@ -106,14 +113,24 @@ async def _process_chat(
 
     requested_model = body.get("model", "")
     known_tier = settings.models.tier_for_alias(requested_model)
-    if known_tier is None:
-        # We no longer check Tier(requested_model) because Tier enum is gone.
-        # tier_for_alias already handles api_id and alias matches.
-        known_tier = None
-
     if known_tier is not None:
         routed_tier = known_tier
+    elif requested_model == "adaptive":
+        # Explicit 'adaptive' request. Requires at least one adaptive tier.
+        if not settings.models.has_adaptive():
+            raise HTTPException(
+                status_code=400,
+                detail="No adaptive tiers configured. Add mini/air/pro/ultra to the 'adaptive' block, or request a custom model by id.",
+            )
+        routed_tier = await classify(prompt, settings)
     else:
+        # Unknown model id — fall back to the classifier (if adaptive exists),
+        # else error clearly.
+        if not settings.models.has_adaptive():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown model '{requested_model}'. No adaptive tiers configured; request a custom model by id.",
+            )
         routed_tier = await classify(prompt, settings)
 
     routed_spec = settings.models.tiers[routed_tier]

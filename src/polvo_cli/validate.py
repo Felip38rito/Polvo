@@ -48,9 +48,12 @@ def config_problems(path: Path | None = None) -> list[str]:
     if not isinstance(providers, dict) or not providers:
         problems.append("No providers configured. Run 'polvo provider' to add one.")
 
-    tiers = data.get("tiers") or {}
-    if not isinstance(tiers, dict) or not tiers:
-        problems.append("No tiers configured. Run 'polvo tier' to add one.")
+    adaptive = data.get("adaptive") or {}
+    custom = data.get("custom") or {}
+    if not isinstance(adaptive, dict) or not isinstance(custom, dict):
+        problems.append("Config is malformed: 'adaptive' and 'custom' must be mappings.")
+    elif not adaptive and not custom:
+        problems.append("No models configured. Run 'polvo tier' to add adaptive tiers or custom models.")
 
     classifier = data.get("classifier") or {}
     if not isinstance(classifier, dict) or not classifier.get("model"):

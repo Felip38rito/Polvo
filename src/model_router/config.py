@@ -32,9 +32,20 @@ def _load_dotenv(path: Path | None) -> None:
 
 def load_models_yaml(path: Path | None) -> RouterModels | None:
     """Load a model table + classifier config from a YAML file.
-    
+
     Returns None if the file is missing. Raises if the file is malformed or
     references an unknown tier/provider.
+
+    The YAML defines a ``providers:`` block mapping a provider name to its
+    ``base_url`` and ``api_key_env``/``api_key``. Models live in two blocks:
+
+    - ``adaptive:`` — the fixed axis (mini/air/pro/ultra). Keys must be one of
+      the four adaptive names. The classifier only ever picks among these.
+    - ``custom:`` — any extra models the user wants available. Keys are free
+      strings; they are routable by explicit model id but never chosen by the
+      classifier.
+
+    Each model entry references a provider via ``provider: <name>``.
     """
     if path is None or not path.exists():
         return None
@@ -56,18 +67,23 @@ def load_models_yaml(path: Path | None) -> RouterModels | None:
             api_key_env=str(pcfg.get("api_key_env")) if "api_key_env" in pcfg else None,
         )
 
-    # --- Tiers ---
+    # --- Adaptive tiers ---
     tiers: dict[str, ModelSpec] = {}
-    raw_tiers = data.get("tiers") or {}
-    if not isinstance(raw_tiers, dict):
-        raise ValueError("'tiers' must be a mapping")
-    for tier_key, spec in raw_tiers.items():
+    raw_adaptive = data.get("adaptive") or {}
+    if not isinstance(raw_adaptive, dict):
+        raise ValueError("'adaptive' must be a mapping")
+    for tier_key, spec in raw_adaptive.items():
         tier_key = str(tier_key)
+        if tier_key not in ADAPTIVE_TIERS:
+            raise ValueError(
+                f"Unknown adaptive tier '{tier_key}' in {path}. "
+                f"Adaptive tiers are fixed: {', '.join(ADAPTIVE_TIERS)}."
+            )
         if not isinstance(spec, dict) or not spec.get("model"):
-            raise ValueError(f"Tier '{tier_key}' must define a 'model'")
+            raise ValueError(f"Adaptive tier '{tier_key}' must define a 'model'")
         provider = str(spec.get("provider", "default"))
         if provider not in providers:
-            raise ValueError(f"Tier '{tier_key}' references unknown provider '{provider}' in {path}")
+            raise ValueError(f"Adaptive tier '{tier_key}' references unknown provider '{provider}' in {path}")
         extra_params = spec.get("extra_params", {})
         if not isinstance(extra_params, dict):
             raise ValueError(f"extra_params for tier '{tier_key}' must be a mapping")
@@ -79,8 +95,40 @@ def load_models_yaml(path: Path | None) -> RouterModels | None:
             extra_params=extra_params,
         )
 
+    # --- Custom models ---
+    custom_models: dict[str, ModelSpec] = {}
+    raw_custom = data.get("custom") or {}
+    if not isinstance(raw_custom, dict):
+        raise ValueError("'custom' must be a mapping")
+    for tier_key, spec in raw_custom.items():
+        tier_key = str(tier_key)
+        if tier_key in ADAPTIVE_TIERS:
+            raise ValueError(
+                f"Custom model '{tier_key}' collides with an adaptive tier name in {path}. "
+                f"Use the 'adaptive' block for adaptive tiers."
+            )
+        if not isinstance(spec, dict) or not spec.get("model"):
+            raise ValueError(f"Custom model '{tier_key}' must define a 'model'")
+        provider = str(spec.get("provider", "default"))
+        if provider not in providers:
+            raise ValueError(f"Custom model '{tier_key}' references unknown provider '{provider}' in {path}")
+        extra_params = spec.get("extra_params", {})
+        if not isinstance(extra_params, dict):
+            raise ValueError(f"extra_params for custom model '{tier_key}' must be a mapping")
+        custom_models[tier_key] = ModelSpec(
+            api_id=str(spec["model"]),
+            description=str(spec.get("description", "")),
+            provider=provider,
+            name=str(spec["name"]) if spec.get("name") else None,
+            extra_params=extra_params,
+        )
+
+    # Merge custom into the unified tiers dict (custom keys never collide with
+    # adaptive keys — enforced above).
+    tiers.update(custom_models)
+
     if not tiers:
-        raise ValueError(f"At least one tier must be configured in {path}")
+        raise ValueError(f"At least one model must be configured in {path}")
 
     # --- Classifier ---
     classifier = data.get("classifier") or {}
@@ -96,17 +144,18 @@ def load_models_yaml(path: Path | None) -> RouterModels | None:
     min_classify_len = int(classifier.get("min_classify_len", 10))
 
     # --- Default Tier Derivation ---
-    # Smallest configured adaptive tier in axis order
+    # Smallest configured adaptive tier in axis order. If no adaptive tier is
+    # configured, there is no default fallback and the 'adaptive' model is
+    # unavailable (custom models still route by explicit id).
     default_tier = None
     for t in ADAPTIVE_TIERS:
         if t in tiers:
             default_tier = t
             break
-    if default_tier is None:
-        raise ValueError(f"No adaptive tiers (mini, air, pro, ultra) configured in {path}; needed for default fallback")
 
     return RouterModels(
         tiers=tiers,
+        custom_models=custom_models,
         default_tier=default_tier,
         classifier_model=classifier_model,
         classifier_provider=classifier_provider,

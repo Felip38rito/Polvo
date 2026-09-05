@@ -276,7 +276,7 @@ def test_custom_models_yaml_drives_proxy(tmp_path, monkeypatch):
         "  default:\n"
         "    base_url: https://ollama.com/v1\n"
         "    api_key_env: OLLAMA_API_KEY\n"
-        "tiers:\n"
+        "adaptive:\n"
         "  mini:\n"
         "    model: my-mini\n"
         "    description: \"cheap\"\n"
@@ -344,7 +344,7 @@ def test_multi_provider_routes_to_correct_endpoint(tmp_path, monkeypatch):
         "  gemini:\n"
         "    base_url: https://generativelanguage.googleapis.com/v1beta\n"
         "    api_key_env: GEMINI_API_KEY\n"
-        "tiers:\n"
+        "adaptive:\n"
         "  mini:\n"
         "    model: gemma4:31b\n"
         "  air:\n"
@@ -550,3 +550,124 @@ def test_responses_shim_translates(client: TestClient, monkeypatch):
 def test_responses_shim_invalid_json_400(client: TestClient):
     r = client.post("/v1/responses", content="nope", headers={"Content-Type": "application/json"})
     assert r.status_code == 400
+
+
+# --- custom model routing ----------------------------------------------------
+
+def test_custom_model_routes_directly(client: TestClient, monkeypatch):
+    """A custom model id routes directly, bypassing the classifier."""
+    from model_router.models import ModelSpec, ProviderSpec, RouterModels
+
+    models = RouterModels(
+        tiers={
+            "mini": ModelSpec("gemma4:31b", "fast"),
+            "meu-modelo": ModelSpec("my-custom-model", "custom"),
+        },
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier="mini",
+        classifier_model="gemma4:31b",
+        classifier_provider="default",
+        providers={
+            "default": ProviderSpec("https://ollama.com/v1", api_key_env="OLLAMA_API_KEY")
+        },
+    )
+    settings = Settings(
+        ollama_api_key="upstream-key",
+        ollama_base_url="https://ollama.com/v1",
+        models=models,
+    )
+    client = TestClient(_make_app(settings))
+
+    seen = {}
+
+    async def fake_post(self, url, headers, **kw):
+        seen["model"] = kw["json"]["model"]
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "meu-modelo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 200
+    assert seen["model"] == "my-custom-model"
+    assert r.headers["X-Router-Tier"] == "meu-modelo"
+
+
+def test_adaptive_without_adaptive_tiers_errors(client: TestClient):
+    """'model: adaptive' with no adaptive tiers configured must 400."""
+    from model_router.models import ModelSpec, ProviderSpec, RouterModels
+
+    models = RouterModels(
+        tiers={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier=None,
+        classifier_model="gemma4:31b",
+        classifier_provider="default",
+        providers={
+            "default": ProviderSpec("https://ollama.com/v1", api_key_env="OLLAMA_API_KEY")
+        },
+    )
+    settings = Settings(
+        ollama_api_key="upstream-key",
+        ollama_base_url="https://ollama.com/v1",
+        models=models,
+    )
+    client = TestClient(_make_app(settings))
+
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "adaptive", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 400
+    assert "No adaptive tiers" in r.json()["detail"]
+
+
+def test_unknown_model_without_adaptive_errors(client: TestClient):
+    """An unknown model id with no adaptive tiers must 400, not silently route."""
+    from model_router.models import ModelSpec, ProviderSpec, RouterModels
+
+    models = RouterModels(
+        tiers={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier=None,
+        classifier_model="gemma4:31b",
+        classifier_provider="default",
+        providers={
+            "default": ProviderSpec("https://ollama.com/v1", api_key_env="OLLAMA_API_KEY")
+        },
+    )
+    settings = Settings(
+        ollama_api_key="upstream-key",
+        ollama_base_url="https://ollama.com/v1",
+        models=models,
+    )
+    client = TestClient(_make_app(settings))
+
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "bogus", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 400
+    assert "Unknown model" in r.json()["detail"]
+
+
+def test_models_payload_tags_custom_type():
+    """/v1/models must tag custom models with type=custom and omit 'adaptive' when none."""
+    from model_router.proxy import _model_list_payload
+
+    models = RouterModels(
+        tiers={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier=None,
+    )
+    payload = _model_list_payload(models)
+    ids = [m["id"] for m in payload["data"]]
+    assert "adaptive" not in ids  # no adaptive tiers -> no virtual model
+    assert "meu-modelo" in ids
+    custom = next(m for m in payload["data"] if m["id"] == "meu-modelo")
+    assert custom["type"] == "custom"

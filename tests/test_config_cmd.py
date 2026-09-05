@@ -24,11 +24,14 @@ def config_file(tmp_path: Path) -> Path:
                         "api_key_env": "OLLAMA_API_KEY",
                     }
                 },
-                "tiers": {
+                "adaptive": {
                     "mini": {"model": "gemma4:31b", "name": "mini"},
                     "air": {"model": "deepseek-v4-flash:0731", "name": "air"},
                     "pro": {"model": "deepseek-v4-pro:0813", "name": "pro"},
                     "ultra": {"model": "kimi-k3", "name": "ultra"},
+                },
+                "custom": {
+                    "meu-modelo": {"model": "my-custom", "name": "Meu Modelo"},
                 },
                 "classifier": {"model": "gemma4:31b", "provider": "default"},
             },
@@ -75,7 +78,8 @@ def test_load_config_not_mapping_raises(monkeypatch, tmp_path: Path):
 
 def test_load_config_ok(patch_config_path, config_file: Path):
     data = config_cmd._load_config()
-    assert data["tiers"]["pro"]["model"] == "deepseek-v4-pro:0813"
+    assert data["adaptive"]["pro"]["model"] == "deepseek-v4-pro:0813"
+    assert data["custom"]["meu-modelo"]["model"] == "my-custom"
 
 
 # --- _save_config -----------------------------------------------------------
@@ -102,7 +106,13 @@ def test_list_config_prints_table(patch_config_path, capsys):
 def test_set_tier_model_updates(patch_config_path, config_file: Path):
     config_cmd.set_tier_model("pro", "new-pro-model")
     data = yaml.safe_load(config_file.read_text())
-    assert data["tiers"]["pro"]["model"] == "new-pro-model"
+    assert data["adaptive"]["pro"]["model"] == "new-pro-model"
+
+
+def test_set_tier_model_updates_custom(patch_config_path, config_file: Path):
+    config_cmd.set_tier_model("meu-modelo", "new-custom")
+    data = yaml.safe_load(config_file.read_text())
+    assert data["custom"]["meu-modelo"]["model"] == "new-custom"
 
 
 def test_set_tier_model_unknown_tier_raises(patch_config_path):

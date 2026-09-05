@@ -1,4 +1,4 @@
-"""Tests for config + dynamic tier table loading (new design)."""
+"""Tests for config + model table loading (adaptive + custom design)."""
 from pathlib import Path
 
 import pytest
@@ -8,21 +8,22 @@ from model_router.config import Settings, load_models_yaml
 from model_router.models import ModelSpec, RouterModels
 
 
-# --- load_models_yaml: dynamic tiers -----------------------------------------
+# --- load_models_yaml: adaptive + custom -------------------------------------
 
-def test_load_yaml_adaptive_and_extra(tmp_path: Path):
+def test_load_yaml_adaptive_and_custom(tmp_path: Path):
     cfg = tmp_path / "config.yml"
     cfg.write_text("""\
 providers:
   p1:
     base_url: https://x.com/v1
-tiers:
+adaptive:
   mini:
     model: m-mini
     provider: p1
   pro:
     model: m-pro
     provider: p1
+custom:
   my-special:
     model: m-special
     provider: p1
@@ -35,6 +36,8 @@ classifier:
     assert set(models.tiers.keys()) == {"mini", "pro", "my-special"}
     assert models.tiers["mini"].api_id == "m-mini"
     assert models.tiers["my-special"].api_id == "m-special"
+    # custom subset tracked separately
+    assert set(models.custom_models.keys()) == {"my-special"}
     # default_tier derived: smallest adaptive configured
     assert models.default_tier == "mini"
 
@@ -45,7 +48,7 @@ def test_load_yaml_default_tier_derivation_order(tmp_path: Path):
 providers:
   p1:
     base_url: https://x.com/v1
-tiers:
+adaptive:
   pro:
     model: m-pro
     provider: p1
@@ -66,28 +69,30 @@ def test_load_yaml_missing_returns_none(tmp_path: Path):
     assert load_models_yaml(tmp_path / "nope.yaml") is None
 
 
-def test_load_yaml_zero_tiers_raises(tmp_path: Path):
+def test_load_yaml_zero_models_raises(tmp_path: Path):
     cfg = tmp_path / "config.yml"
     cfg.write_text("""\
 providers:
   p1:
     base_url: https://x.com/v1
-tiers: {}
+adaptive: {}
+custom: {}
 classifier:
   model: m
   provider: p1
 """)
-    with pytest.raises(ValueError, match="At least one tier"):
+    with pytest.raises(ValueError, match="At least one model"):
         load_models_yaml(cfg)
 
 
-def test_load_yaml_no_adaptive_tiers_raises(tmp_path: Path):
+def test_load_yaml_custom_only_allowed(tmp_path: Path):
+    """A config with only custom models is valid (no adaptive required)."""
     cfg = tmp_path / "config.yml"
     cfg.write_text("""\
 providers:
   p1:
     base_url: https://x.com/v1
-tiers:
+custom:
   only-extra:
     model: m
     provider: p1
@@ -95,7 +100,46 @@ classifier:
   model: c
   provider: p1
 """)
-    with pytest.raises(ValueError, match="No adaptive tiers"):
+    models = load_models_yaml(cfg)
+    assert models is not None
+    assert models.default_tier is None
+    assert models.has_adaptive() is False
+    assert models.is_custom("only-extra") is True
+
+
+def test_load_yaml_unknown_adaptive_tier_raises(tmp_path: Path):
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("""\
+providers:
+  p1:
+    base_url: https://x.com/v1
+adaptive:
+  bogus:
+    model: m
+    provider: p1
+classifier:
+  model: c
+  provider: p1
+""")
+    with pytest.raises(ValueError, match="Unknown adaptive tier 'bogus'"):
+        load_models_yaml(cfg)
+
+
+def test_load_yaml_custom_collides_with_adaptive_raises(tmp_path: Path):
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("""\
+providers:
+  p1:
+    base_url: https://x.com/v1
+custom:
+  mini:
+    model: m
+    provider: p1
+classifier:
+  model: c
+  provider: p1
+""")
+    with pytest.raises(ValueError, match="collides with an adaptive tier name"):
         load_models_yaml(cfg)
 
 
@@ -105,7 +149,7 @@ def test_load_yaml_classifier_model_required(tmp_path: Path):
 providers:
   p1:
     base_url: https://x.com/v1
-tiers:
+adaptive:
   mini:
     model: m
     provider: p1
@@ -122,7 +166,7 @@ def test_load_yaml_unknown_tier_provider_raises(tmp_path: Path):
 providers:
   p1:
     base_url: https://x.com/v1
-tiers:
+adaptive:
   mini:
     model: m
     provider: nope
@@ -144,7 +188,7 @@ providers:
   gemini:
     base_url: https://gen.com/v1
     api_key_env: GEMINI_API_KEY
-tiers:
+adaptive:
   mini:
     model: gemma4:31b
   air:
