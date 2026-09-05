@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from .classify import classify
 from .config import Settings
-from .models import Tier
+from .models import RouterModels
 from . import responses as responses_translate
 
 log = logging.getLogger("model_router.proxy")
@@ -35,15 +35,15 @@ def _model_list_payload(models: "RouterModels") -> dict[str, Any]:
             "owned_by": "polvo",
         }
     ]
-    for tier in Tier:
-        spec = models.tiers[tier]
+    # Advertise all configured tiers (adaptive + extras)
+    for tier_key, spec in models.tiers.items():
         data.append(
             {
-                "id": spec.name or tier.value,
+                "id": spec.name or tier_key,
                 "object": "model",
                 "created": 0,
                 "owned_by": "polvo",
-                "tier": tier.value,
+                "tier": tier_key,
                 "model": spec.api_id,
             }
         )
@@ -107,10 +107,9 @@ async def _process_chat(
     requested_model = body.get("model", "")
     known_tier = settings.models.tier_for_alias(requested_model)
     if known_tier is None:
-        try:
-            known_tier = Tier(requested_model)
-        except ValueError:
-            known_tier = None
+        # We no longer check Tier(requested_model) because Tier enum is gone.
+        # tier_for_alias already handles api_id and alias matches.
+        known_tier = None
 
     if known_tier is not None:
         routed_tier = known_tier
@@ -124,7 +123,7 @@ async def _process_chat(
     snippet = prompt[:50].replace("\n", " ") + "..."
     log.info(
         "Tier=%s Model=%s Provider=%s Prompt=%s",
-        routed_tier.value,
+        routed_tier,
         routed_model,
         provider.base_url,
         snippet,
@@ -183,7 +182,7 @@ async def _process_chat(
 
     headers_out = {
         "X-Router-Model": routed_model,
-        "X-Router-Tier": routed_tier.value,
+        "X-Router-Tier": routed_tier,
     }
 
     media = "text/event-stream" if stream else "application/json"

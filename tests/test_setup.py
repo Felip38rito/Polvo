@@ -1,73 +1,45 @@
-"""Tests for the polvo setup flow (config.yml generation)."""
+"""Tests for the polvo setup wizard (section-based, autosave)."""
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
 
 import pytest
+import yaml
 
 from polvo_cli import setup
-from model_router.models import Tier
 
 
-# --- _build_config (pure) ---------------------------------------------------
+# --- config_path ------------------------------------------------------------
 
-def _tiers(models: dict[Tier, str] | None = None) -> dict[Tier, dict[str, Any]]:
-    """Build a minimal tiers dict with the given model ids (defaults to examples)."""
-    models = models or setup.EXAMPLE_MODELS
-    return {
-        tier: {"name": tier.value, "model": model}
-        for tier, model in models.items()
-    }
+def test_config_path_points_to_user_config(monkeypatch):
+    import pathlib
+    monkeypatch.setattr(pathlib.Path, "home", lambda: Path("/tmp/fake-home"))
+    assert setup.config_path() == Path("/tmp/fake-home") / ".config" / "polvo" / "config.yml"
 
 
-def test_build_config_env_var_provider():
-    provider = {
-        "name": "default",
-        "base_url": "https://ollama.com/v1",
-        "api_key_env": "OLLAMA_API_KEY",
-    }
-    config = setup._build_config(provider, _tiers())
+# --- _load_config / _save_config ---------------------------------------------
 
-    assert config["default_tier"] == "air"
-    assert config["providers"]["default"]["base_url"] == "https://ollama.com/v1"
-    assert config["providers"]["default"]["api_key_env"] == "OLLAMA_API_KEY"
-    # No inline key should leak into the env-var path.
-    assert "api_key" not in config["providers"]["default"]
-    # All four tiers present with correct model ids.
-    assert config["tiers"]["mini"]["model"] == "gemma4:31b"
-    assert config["tiers"]["pro"]["model"] == "deepseek-v4-pro:0813"
-    # Classifier points at the provider.
-    assert config["classifier"]["provider"] == "default"
-    assert config["classifier"]["model"] == "gemma4:31b"
+def test_load_config_missing_returns_empty(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(setup, "config_path", lambda: tmp_path / "nope.yml")
+    assert setup._load_config() == {"providers": {}, "tiers": {}}
 
 
-def test_build_config_inline_key_provider():
-    provider = {
-        "name": "openai",
-        "base_url": "https://api.openai.com/v1",
-        "api_key": "sk-inline-secret",
-    }
-    config = setup._build_config(provider, _tiers())
-
-    assert config["providers"]["openai"]["api_key"] == "sk-inline-secret"
-    # Inline key must NOT also emit an api_key_env (avoids ambiguity).
-    assert "api_key_env" not in config["providers"]["openai"]
-    assert config["classifier"]["provider"] == "openai"
+def test_load_config_invalid_yaml_returns_empty(monkeypatch, tmp_path: Path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text("tiers: [unclosed")
+    monkeypatch.setattr(setup, "config_path", lambda: bad)
+    assert setup._load_config() == {"providers": {}, "tiers": {}}
 
 
-def test_build_config_extra_params():
-    tiers = _tiers()
-    tiers[Tier.AIR]["extra_params"] = {"reasoning_effort": "high"}
-    config = setup._build_config(
-        {"name": "default", "base_url": "https://ollama.com/v1", "api_key_env": "X"},
-        tiers,
-    )
-    assert config["tiers"]["air"]["extra_params"] == {"reasoning_effort": "high"}
-    # Tiers without extra_params omit the key entirely.
-    assert "extra_params" not in config["tiers"]["mini"]
+def test_save_config_writes_yaml(monkeypatch, tmp_path: Path):
+    target = tmp_path / "config.yml"
+    monkeypatch.setattr(setup, "config_path", lambda: target)
+    setup._save_config({"providers": {}, "tiers": {}})
+    assert target.exists()
+    assert yaml.safe_load(target.read_text()) == {"providers": {}, "tiers": {}}
 
 
-# --- _required_prompt -------------------------------------------------------
+# --- _required_prompt --------------------------------------------------------
 
 def test_required_prompt_rejects_blank(monkeypatch):
     calls = iter(["", "   ", "real-value"])
@@ -80,146 +52,128 @@ def test_required_prompt_strips_whitespace(monkeypatch):
     assert setup._required_prompt("anything") == "padded"
 
 
-# --- _prompt_provider -------------------------------------------------------
+# --- setup_provider ----------------------------------------------------------
 
-def test_prompt_provider_env_var(monkeypatch):
-    answers = iter(["default", "https://ollama.com/v1", "OLLAMA_API_KEY"])
-    monkeypatch.setattr(setup.Prompt, "ask", lambda prompt: next(answers))
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: False)
-
-    result = setup._prompt_provider()
-    assert result == {
-        "name": "default",
-        "base_url": "https://ollama.com/v1",
-        "api_key_env": "OLLAMA_API_KEY",
-    }
-
-
-def test_prompt_provider_inline_key(monkeypatch):
-    answers = iter(["openai", "https://api.openai.com/v1", "sk-secret"])
-    monkeypatch.setattr(setup.Prompt, "ask", lambda prompt: next(answers))
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: True)
-
-    result = setup._prompt_provider()
-    assert result == {
-        "name": "openai",
-        "base_url": "https://api.openai.com/v1",
-        "api_key": "sk-secret",
-    }
-    assert "api_key_env" not in result
-
-
-def test_prompt_provider_strips_trailing_slash(monkeypatch):
-    answers = iter(["default", "https://ollama.com/v1/", "OLLAMA_API_KEY"])
-    monkeypatch.setattr(setup.Prompt, "ask", lambda prompt: next(answers))
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: False)
-
-    result = setup._prompt_provider()
-    assert result["base_url"] == "https://ollama.com/v1"
-
-
-# --- _prompt_tiers ----------------------------------------------------------
-
-def test_prompt_tiers_omakase(monkeypatch):
-    # Omakase: names come from tier keys; only model ids are prompted.
-    model_answers = iter(setup.EXAMPLE_MODELS.values())
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: True)
-    monkeypatch.setattr(
-        setup.Prompt,
-        "ask",
-        lambda prompt: next(model_answers),
-    )
-
-    tiers = setup._prompt_tiers()
-    assert tiers[Tier.MINI]["name"] == "mini"
-    assert tiers[Tier.MINI]["model"] == "gemma4:31b"
-    assert tiers[Tier.ULTRA]["model"] == "kimi-k3"
-
-
-def test_prompt_tiers_custom_names(monkeypatch):
-    # Custom: display name is prompted (defaults to tier key), then model id.
-    answers = iter([
-        "Fast", "gemma4:31b",
-        "Daily", "deepseek-v4-flash:0731",
-        "Power", "deepseek-v4-pro:0813",
-        "Deep", "kimi-k3",
-    ])
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: False)
-    monkeypatch.setattr(setup.Prompt, "ask", lambda prompt, **k: next(answers))
-
-    tiers = setup._prompt_tiers()
-    assert tiers[Tier.MINI]["name"] == "Fast"
-    assert tiers[Tier.PRO]["name"] == "Power"
-    assert tiers[Tier.PRO]["model"] == "deepseek-v4-pro:0813"
-
-
-# --- _prompt_reasoning ------------------------------------------------------
-
-def test_prompt_reasoning_skipped_when_declined(monkeypatch):
-    tiers = _tiers()
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: False)
-    setup._prompt_reasoning(tiers)
-    # No tier gained extra_params.
-    assert all("extra_params" not in t for t in tiers.values())
-
-
-def test_prompt_reasoning_adds_params(monkeypatch):
-    tiers = _tiers()
-    # First Confirm (enable reasoning) -> True; then tier loop.
-    confirm_answers = iter([True])
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: next(confirm_answers))
-    # Prompt.ask sequence: tier key, param key, param value, done, done.
-    prompt_answers = iter(["air", "reasoning_effort", "high", "done", "done"])
-    monkeypatch.setattr(setup.Prompt, "ask", lambda prompt, **k: next(prompt_answers))
-
-    setup._prompt_reasoning(tiers)
-    assert tiers[Tier.AIR]["extra_params"] == {"reasoning_effort": "high"}
-    assert "extra_params" not in tiers[Tier.MINI]
-
-
-def test_prompt_reasoning_unknown_tier_loops(monkeypatch):
-    tiers = _tiers()
-    confirm_answers = iter([True])
-    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: next(confirm_answers))
-    # First tier key is bogus (loops), then 'done' exits.
-    prompt_answers = iter(["bogus", "done"])
-    monkeypatch.setattr(setup.Prompt, "ask", lambda prompt, **k: next(prompt_answers))
-
-    setup._prompt_reasoning(tiers)
-    assert all("extra_params" not in t for t in tiers.values())
-
-
-# --- run_setup --------------------------------------------------------------
-
-def test_run_setup_writes_config(monkeypatch, tmp_path):
-    """run_setup writes a valid config.yml to the config path."""
+def test_setup_provider_adds_and_saves(monkeypatch, tmp_path: Path):
     target = tmp_path / "config.yml"
     monkeypatch.setattr(setup, "config_path", lambda: target)
+    # Actions: list (empty), add, done
+    action_answers = iter(["list", "add", "done"])
+    prompt_answers = iter([
+        "MyCloud",                # provider name
+        "https://cloud.com/v1",   # base_url
+        "MYCLOUD_API_KEY",        # env var
+    ])
+    confirm_answers = iter([False])  # not inline key -> env var
 
-    # _prompt_provider: name, base_url, then Confirm(inline)=False, then api_key_env.
-    provider_answers = iter(["default", "https://ollama.com/v1", "OLLAMA_API_KEY"])
-    # _prompt_tiers: Confirm(omakase)=True, then 4 model ids.
-    tier_answers = iter(setup.EXAMPLE_MODELS.values())
-    # _prompt_reasoning: Confirm(enable)=False.
-    confirm_answers = iter([False, True, False])
+    monkeypatch.setattr(setup.Prompt, "ask", lambda prompt, **k: next(prompt_answers))
+    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: next(confirm_answers))
+    # Route the action prompt separately: it contains "(add/list/remove/done)"
+    real_prompt = setup.Prompt.ask
+    def fake_ask(prompt, *a, **k):
+        if "Action" in prompt:
+            return next(action_answers)
+        return real_prompt(prompt, *a, **k)
+    monkeypatch.setattr(setup.Prompt, "ask", fake_ask)
 
-    def fake_confirm(*a, **k):
-        return next(confirm_answers)
+    setup.setup_provider()
+    data = yaml.safe_load(target.read_text())
+    assert data["providers"]["MyCloud"]["base_url"] == "https://cloud.com/v1"
+    assert data["providers"]["MyCloud"]["api_key_env"] == "MYCLOUD_API_KEY"
 
-    def fake_prompt(prompt, **k):
-        # Route to the right answer stream based on the prompt text.
-        if "Provider name" in prompt or "base_url" in prompt or "API key" in prompt:
-            return next(provider_answers)
-        return next(tier_answers)
 
-    monkeypatch.setattr(setup.Confirm, "ask", fake_confirm)
-    monkeypatch.setattr(setup.Prompt, "ask", fake_prompt)
+def test_setup_provider_inline_key(monkeypatch, tmp_path: Path):
+    target = tmp_path / "config.yml"
+    monkeypatch.setattr(setup, "config_path", lambda: target)
+    action_answers = iter(["add", "done"])
+    prompt_answers = iter(["Cloud", "https://cloud.com/v1", "sk-secret"])
+    confirm_answers = iter([True])  # inline key
 
+    def fake_ask(prompt, *a, **k):
+        if "Action" in prompt:
+            return next(action_answers)
+        return next(prompt_answers)
+    monkeypatch.setattr(setup.Prompt, "ask", fake_ask)
+    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: next(confirm_answers))
+
+    setup.setup_provider()
+    data = yaml.safe_load(target.read_text())
+    assert data["providers"]["Cloud"]["api_key"] == "sk-secret"
+    assert "api_key_env" not in data["providers"]["Cloud"]
+
+
+# --- setup_tier --------------------------------------------------------------
+
+def test_setup_tier_requires_existing_provider(monkeypatch, tmp_path: Path):
+    """With no providers, tier setup must bail and tell the user to add one first."""
+    target = tmp_path / "config.yml"
+    target.write_text(yaml.safe_dump({"providers": {}, "tiers": {}}))
+    monkeypatch.setattr(setup, "config_path", lambda: target)
+
+    # If we reach an action prompt, the guard failed. No actions should be asked.
+    calls = {"n": 0}
+    def unexpected(prompt, *a, **k):
+        calls["n"] += 1
+        return "done"
+    monkeypatch.setattr(setup.Prompt, "ask", unexpected)
+
+    setup.setup_tier()
+    # We should never have prompted for an action (guard bails immediately).
+    assert calls["n"] == 0
+    data = yaml.safe_load(target.read_text())
+    assert data["tiers"] == {}
+
+
+def test_setup_tier_adds_with_existing_provider(monkeypatch, tmp_path: Path):
+    target = tmp_path / "config.yml"
+    target.write_text(yaml.safe_dump({
+        "providers": {"Cloud": {"base_url": "https://cloud.com/v1", "api_key_env": "K"}},
+        "tiers": {},
+    }))
+    monkeypatch.setattr(setup, "config_path", lambda: target)
+
+    action_answers = iter(["add", "done"])
+    prompt_answers = iter(["pro", "Cloud", "my-pro-model", "Pro Tier"])
+
+    def fake_ask(prompt, *a, **k):
+        if "Action" in prompt:
+            return next(action_answers)
+        return next(prompt_answers)
+
+    monkeypatch.setattr(setup.Prompt, "ask", fake_ask)
+    # No reasoning effort (extra_params) — Confirm returns False.
+    monkeypatch.setattr(setup.Confirm, "ask", lambda *a, **k: False)
+
+    setup.setup_tier()
+    data = yaml.safe_load(target.read_text())
+    assert data["tiers"]["pro"]["model"] == "my-pro-model"
+    assert data["tiers"]["pro"]["provider"] == "Cloud"
+    assert data["tiers"]["pro"]["name"] == "Pro Tier"
+
+
+# --- run_setup ---------------------------------------------------------------
+
+def test_run_setup_unknown_section_errors(monkeypatch):
+    monkeypatch.setattr(setup, "setup_provider", lambda: None)
+    monkeypatch.setattr(setup, "setup_tier", lambda: None)
+    monkeypatch.setattr(setup.Console, "print", lambda self, *a, **k: None)
+    # Unknown section: prints a message, calls no wizard.
+    setup.run_setup("bogus")
+
+
+def test_run_setup_provider_section_only(monkeypatch):
+    called = {"provider": False, "tier": False}
+    monkeypatch.setattr(setup, "setup_provider", lambda: called.update(provider=True))
+    monkeypatch.setattr(setup, "setup_tier", lambda: called.update(tier=True))
+    setup.run_setup("provider")
+    assert called["provider"] is True
+    assert called["tier"] is False
+
+
+def test_run_setup_full_runs_both(monkeypatch):
+    called = {"provider": False, "tier": False}
+    monkeypatch.setattr(setup, "setup_provider", lambda: called.update(provider=True))
+    monkeypatch.setattr(setup, "setup_tier", lambda: called.update(tier=True))
     setup.run_setup()
-
-    import yaml as _yaml
-    data = _yaml.safe_load(target.read_text())
-    assert data["providers"]["default"]["api_key_env"] == "OLLAMA_API_KEY"
-    assert data["tiers"]["mini"]["model"] == "gemma4:31b"
-    assert data["tiers"]["ultra"]["model"] == "kimi-k3"
-    assert data["classifier"]["provider"] == "default"
+    assert called["provider"] is True
+    assert called["tier"] is True

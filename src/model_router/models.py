@@ -1,23 +1,8 @@
-"""Model tier table: tier key -> model spec.
-
-The default table is the LIVE `/v1/models` API ids (verified 2026-08-25). It
-can be overridden at runtime via a YAML config file (see `router.models.yaml`).
-IMPORTANT: use raw API ids — the `:cloud` suffix is an Hermes alias only and
-returns 404 against the Ollama Cloud API.
-"""
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
-
-class Tier(str, Enum):
-    MINI = "mini"
-    AIR = "air"
-    PRO = "pro"
-    ULTRA = "ultra"
-
+# The fixed axis of adaptive tiers. Order matters for default_tier derivation.
+ADAPTIVE_TIERS = ("mini", "air", "pro", "ultra")
 
 @dataclass(frozen=True)
 class ProviderSpec:
@@ -30,7 +15,7 @@ class ProviderSpec:
 
     base_url: str
     api_key: str | None = None
-    api_key_env: str | None = "OLLAMA_API_KEY"
+    api_key_env: str | None = None
 
     def resolve_api_key(self, fallback: str | None = None) -> str:
         """Resolve the API key from inline value, environment variable, or a provided fallback.
@@ -51,76 +36,51 @@ class ProviderSpec:
             raise RuntimeError(f"No API key found for provider: inline is empty, env var '{env_var}' is not set, and no fallback provided.")
         return res
 
-
 @dataclass(frozen=True)
 class ModelSpec:
     api_id: str
     description: str
-    # Which named provider (see Settings.providers) serves this tier. Defaults
-    # to "default" so existing single-provider configs keep working unchanged.
+    # Which named provider (see Settings.providers) serves this tier.
     provider: str = "default"
     # Optional display/route alias. If set, /v1/models advertises this as the
-    # model id and the proxy accepts it as an alias for the tier. If None, the
-    # tier key (mini/air/pro/ultra) is used. Never affects the classifier's
+    # model id and the proxy accepts it as an alias for the tier. If None,
+    # the tier key (mini/air/pro/ultra) is used. Never affects the classifier's
     # internal key.
     name: str | None = None
     # Arbitrary provider-specific parameters (e.g. reasoning_effort,
     # budget_tokens) merged into the upstream request body for this tier.
     extra_params: dict[str, Any] = field(default_factory=dict)
 
-
-# The built-in single-provider table. `air` is the default for day-to-day work.
-_DEFAULT_TABLE: dict[Tier, ModelSpec] = {
-    Tier.MINI: ModelSpec("gemma4:31b", "fast/cheap — discussion + trivial/mechanical tasks"),
-    Tier.AIR: ModelSpec("deepseek-v4-flash:0731", "default — day-to-day implementation"),
-    Tier.PRO: ModelSpec("deepseek-v4-pro:0813", "raw coding power, hard debugging/refactors"),
-    Tier.ULTRA: ModelSpec("kimi-k3", "deep synthesis, whole-architecture, adversarial analysis"),
-}
-
-# The default provider every tier uses when no `providers:` block is configured.
-DEFAULT_PROVIDERS: dict[str, ProviderSpec] = {
-    "default": ProviderSpec(
-        base_url="https://ollama.com/v1",
-        api_key_env="OLLAMA_API_KEY",
-    ),
-}
-
-DEFAULT_TIER = Tier.AIR
-
-
 @dataclass(frozen=True)
 class RouterModels:
     """Mounted model table + classifier config for the running router."""
 
-    tiers: dict[Tier, ModelSpec] = field(default_factory=lambda: dict(_DEFAULT_TABLE))
-    default_tier: Tier = DEFAULT_TIER
+    tiers: dict[str, ModelSpec] = field(default_factory=dict)
+    default_tier: str = "air"
     classifier_model: str = "gemma4:31b"
     # Which named provider serves the classifier (defaults to "default").
     classifier_provider: str = "default"
     min_classify_len: int = 10
     # Named upstream endpoints. Each tier's ModelSpec.provider keys into this.
-    providers: dict[str, ProviderSpec] = field(default_factory=lambda: dict(DEFAULT_PROVIDERS))
+    providers: dict[str, ProviderSpec] = field(default_factory=dict)
 
-    def tier_for_alias(self, alias: str) -> Tier | None:
-        """Resolve a model id or display name to a tier."""
-        for tier, spec in self.tiers.items():
-            if spec.api_id == alias or (spec.name and spec.name == alias):
-                return tier
+    def tier_for_alias(self, alias: str) -> str | None:
+        """Resolve a model id, display name, or tier key to a tier key."""
+        for tier_key, spec in self.tiers.items():
+            if spec.api_id == alias or (spec.name and spec.name == alias) or tier_key == alias:
+                return tier_key
         return None
 
     def provider_for(self, provider_name: str) -> ProviderSpec:
-        """Resolve a provider name to its spec, falling back to "default"."""
-        return self.providers.get(provider_name) or self.providers.get("default", DEFAULT_PROVIDERS["default"])
+        """Resolve a provider name to its spec."""
+        if provider_name not in self.providers:
+            raise ValueError(f"Unknown provider '{provider_name}'")
+        return self.providers[provider_name]
 
-    @property
-    def api_ids(self) -> list[str]:
-        return [spec.api_id for spec in self.tiers.values()]
+    def adaptive_tiers(self) -> list[str]:
+        """Return currently configured adaptive tiers in axis order."""
+        return [t for t in ADAPTIVE_TIERS if t in self.tiers]
 
-
-# Backwards-compatible module-level convenience (used by tests + callers that
-# don't have a settings object). Prefer passing a RouterModels instance.
-MODEL_TABLE: dict[Tier, ModelSpec] = dict(_DEFAULT_TABLE)
-
-
-def tier_for_api_id(api_id: str) -> Tier | None:
-    return RouterModels().tier_for_alias(api_id)
+    def is_adaptive(self, tier_key: str) -> bool:
+        """True if the tier is one of the 4 adaptive ones."""
+        return tier_key in ADAPTIVE_TIERS
