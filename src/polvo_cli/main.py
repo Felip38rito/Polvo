@@ -123,12 +123,16 @@ def provider_list() -> None:
 
 @provider_app.command("add")
 def provider_add(
-    name: str,
-    base_url: str = typer.Option(..., "--url", "-u"),
-    api_key: str | None = typer.Option(None, "--key", "-k"),
-    api_key_env: str | None = typer.Option(None, "--env", "-e"),
+    name: str | None = typer.Argument(None, help="Provider name (e.g. 'Ollama Cloud')"),
+    base_url: str | None = typer.Option(None, "--url", "-u", help="OpenAI-compatible base URL"),
+    api_key: str | None = typer.Option(None, "--key", "-k", help="API key (stored inline)"),
+    api_key_env: str | None = typer.Option(None, "--env", "-e", help="Env var holding the API key"),
 ):
     """Add or update a provider endpoint."""
+    if name is None or base_url is None:
+        err_console.print("[red]Usage: polvo provider add <name> --url <base_url> (--key <key> | --env <env>)[/red]")
+        err_console.print("Example: polvo provider add 'Ollama Cloud' --url https://ollama.com/v1 --env OLLAMA_API_KEY")
+        raise typer.Exit(code=1)
     add_provider(name, base_url, api_key, api_key_env)
 
 
@@ -163,25 +167,29 @@ def tier_list() -> None:
 
 @tier_app.command("set")
 def tier_set(
-    tier_key: str,
-    model: str = typer.Option(..., "--model", "-m"),
-    provider: str = typer.Option(..., "--provider", "-p"),
-    name: str | None = typer.Option(None, "--name", "-n"),
-    effort: str | None = typer.Option(None, "--effort", "-e"),
+    tier_key: str | None = typer.Argument(None, help="Tier key (e.g. 'mini', 'pro', or a custom name)"),
+    model: str | None = typer.Option(None, "--model", "-m", help="The upstream model ID"),
+    provider: str | None = typer.Option(None, "--provider", "-p", help="The name of the configured provider"),
+    name: str | None = typer.Option(None, "--name", "-n", help="Optional display name for this tier"),
+    effort: str | None = typer.Option(None, "--effort", "-e", help="Reasoning effort (e.g. 'medium', 'high')"),
 ):
     """Configure or update a specific tier."""
+    if tier_key is None or model is None or provider is None:
+        err_console.print("[red]Usage: polvo tier set <tier_key> --model <id> --provider <name>[/red]")
+        err_console.print("Example: polvo tier set pro --model deepseek-v4-pro --provider 'Ollama Cloud'")
+        raise typer.Exit(code=1)
     set_tier(tier_key, model, provider, name, effort)
 
 
 # --- Legacy/Alias Config ----------------------------------------------------
 @app.command()
 def config(
-    action: str = typer.Argument(..., help="'list' or 'set'"),
+    action: str | None = typer.Argument(None, help="'list' or 'set' (default: list)"),
     tier: str = typer.Argument(None, help="Tier key (for 'set')"),
     model: str = typer.Option(None, "--model", "-m", help="Model id (for 'set')"),
 ) -> None:
     """View or modify the router config (alias for 'tier')."""
-    if action == "list":
+    if action is None or action == "list":
         list_config()
     elif action == "set":
         if not tier or not model:
@@ -195,9 +203,20 @@ def config(
 
 @app.command()
 def models(
-    provider: str = typer.Argument(..., help="Provider name from the config"),
+    provider: str | None = typer.Argument(None, help="Provider name from the config"),
 ) -> None:
     """List the models a configured provider offers."""
+    if provider is None:
+        from .validate import load_config
+
+        data = load_config() or {}
+        providers = data.get("providers") or {}
+        if not providers:
+            err_console.print("[red]No providers configured.[/red] Run [bold]polvo provider[/bold] to add one.")
+            raise typer.Exit(code=1)
+        err_console.print("[yellow]Usage: polvo models <provider>[/yellow]")
+        err_console.print(f"Available providers: {', '.join(providers.keys())}")
+        raise typer.Exit(code=1)
     list_models(provider)
 
 

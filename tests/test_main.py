@@ -61,6 +61,41 @@ def test_config_unknown_action(runner: CliRunner):
     assert "Unknown config action" in result.output
 
 
+def test_config_no_action_lists(runner: CliRunner, monkeypatch, tmp_path: Path):
+    """'polvo config' with no action should list, not error."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("tiers:\n  mini:\n    model: gemma4:31b\n")
+    monkeypatch.setattr(config_cmd, "config_path", lambda: cfg)
+    result = runner.invoke(main.app, ["config"])
+    assert result.exit_code == 0
+    assert "gemma4:31b" in result.output
+
+
+def test_models_no_provider_shows_usage(runner: CliRunner, monkeypatch, tmp_path: Path):
+    """'polvo models' with no provider should show available providers, not a raw error."""
+    from polvo_cli import validate
+
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("providers:\n  Ollama Cloud:\n    base_url: https://ollama.com/v1\n")
+    monkeypatch.setattr(validate, "config_path", lambda: cfg)
+    result = runner.invoke(main.app, ["models"])
+    assert result.exit_code == 1
+    assert "Usage: polvo models" in result.output
+    assert "Ollama Cloud" in result.output
+
+
+def test_provider_add_no_args_shows_usage(runner: CliRunner):
+    result = runner.invoke(main.app, ["provider", "add"])
+    assert result.exit_code == 1
+    assert "Usage: polvo provider add" in result.output
+
+
+def test_tier_set_no_args_shows_usage(runner: CliRunner):
+    result = runner.invoke(main.app, ["tier", "set"])
+    assert result.exit_code == 1
+    assert "Usage: polvo tier set" in result.output
+
+
 # --- service lifecycle (via _run_polvoctl stub) ------------------------------
 
 @pytest.fixture
