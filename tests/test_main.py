@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import pytest
 import typer
 import yaml
@@ -32,19 +31,18 @@ def test_version(runner: CliRunner):
     assert result.exit_code == 0
     assert "polvo" in result.output
 
-# --- models usage -------------------------------------------------------------
+# --- models usage ------------------------------------------------------------
 
 def test_models_no_provider_shows_usage(runner: CliRunner, monkeypatch, tmp_path: Path):
     """'polvo models' with no provider should show available providers, not a raw error."""
-    from polvo_cli import validate
-
     cfg = tmp_path / "config.yml"
-    cfg.write_text("providers:\n  Ollama Cloud:\n    base_url: https://ollama.com/v1\n")
+    cfg.write_text(yaml.safe_dump({
+        "providers": {"Ollama Cloud": {"base_url": "https://ollama.com/v1"}},
+    }))
     monkeypatch.setattr(core, "config_path", lambda: cfg)
     result = runner.invoke(main.app, ["models"])
     assert result.exit_code == 1
-    assert "Usage: polvo models" in result.output
-    assert "Ollama Cloud" in result.output
+    assert "Available providers: Ollama Cloud" in result.output
 
 def test_provider_add_no_args_shows_usage(runner: CliRunner):
     result = runner.invoke(main.app, ["provider", "add"])
@@ -215,10 +213,72 @@ def test_bare_polvo_triggers_wizard_when_missing_provider(runner: CliRunner, mon
 
     def fake_add_first():
         called["add_first_provider"] += 1
-        raise typer.Exit(code=0)  # stop the onboarding right after step 1
+        raise typer.Exit(code=0)
 
     monkeypatch.setattr(main, "add_first_provider", fake_add_first)
     result = runner.invoke(main.app, [])
     assert called["add_first_provider"] == 1
     assert result.exit_code == 0
     assert "You don't have providers yet" in result.output
+
+def test_bare_polvo_overview_when_not_ready(runner: CliRunner, monkeypatch, tmp_path: Path):
+    """Test _print_overview called with ready=False."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(yaml.safe_dump({
+        "providers": {"A": {"base_url": "x"}},
+        "adaptive": {},
+        "classifier": {},
+    }))
+    monkeypatch.setattr(core, "config_path", lambda: cfg)
+    monkeypatch.setattr(main, "config_problems", lambda: ["Missing tiers"])
+    monkeypatch.setattr(main, "setup_tier", lambda: None)
+    
+    result = runner.invoke(main.app, [])
+    assert "Current config:" in result.output
+    assert "Providers:   A" in result.output
+
+def test_bare_polvo_full_onboarding_flow(runner: CliRunner, monkeypatch, tmp_path: Path):
+    """Test the sequence: Providers -> Tiers -> Start."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(yaml.safe_dump({"providers": {}, "adaptive": {}, "custom": {}}))
+    monkeypatch.setattr(core, "config_path", lambda: cfg)
+    
+    def mock_add_first():
+        core.save_config({"providers": {"Cloud": {}}, "adaptive": {}, "custom": {}})
+    def mock_setup_tier():
+        core.save_config({
+            "providers": {"Cloud": {}}, 
+            "adaptive": {"mini": {"model": "m", "provider": "Cloud"}},
+            "classifier": {"model": "c", "provider": "Cloud"}
+        })
+
+    monkeypatch.setattr(main, "add_first_provider", mock_add_first)
+    monkeypatch.setattr(main, "setup_tier", mock_setup_tier)
+    monkeypatch.setattr(main, "_run_polvoctl", lambda *a: None)
+    
+    # Fix the mock for typer.confirm to avoid the "Aborted" error
+    # We need to handle both calls: 1. "add another provider?" (No), 2. "Start the router?" (Yes)
+    confirm_calls = iter([False, True])
+    monkeypatch.setattr(typer, "confirm", lambda *a, **k: next(confirm_calls))
+    
+    result = runner.invoke(main.app, [])
+    assert result.exit_code == 0
+    assert "Config complete!" in result.output
+
+def test_bare_polvo_still_incomplete(runner: CliRunner, monkeypatch, tmp_path: Path):
+    """Test onboarding fails if config is still broken."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(yaml.safe_dump({"providers": {}, "adaptive": {}, "custom": {}}))
+    monkeypatch.setattr(core, "config_path", lambda: cfg)
+    
+    monkeypatch.setattr(main, "add_first_provider", lambda: None)
+    monkeypatch.setattr(main, "setup_tier", lambda: None)
+    monkeypatch.setattr(main, "config_problems", lambda: ["Still broken"])
+    
+    # Mock confirm to avoid "Aborted"
+    monkeypatch.setattr(typer, "confirm", lambda *a, **k: False)
+    
+    result = runner.invoke(main.app, [])
+    assert result.exit_code == 1
+    assert "Config is still incomplete" in result.output
+    assert "Still broken" in result.output

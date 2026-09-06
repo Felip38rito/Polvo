@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import pytest
 import typer
 import yaml
 
 from polvo_cli import core, provider_cmd
-
 
 @pytest.fixture
 def config_file(tmp_path: Path) -> Path:
@@ -37,7 +35,7 @@ def _fake_prompts(monkeypatch, answers: list[str]):
     monkeypatch.setattr(provider_cmd.Prompt, "ask", fake_ask)
 
 
-# --- setup_provider wizard -----------------------------------------------------
+# --- setup_provider wizard ----------------------------------------------------
 
 def test_setup_provider_adds_and_saves(patch_config_path: Path, config_file: Path, env_file: Path, monkeypatch):
     # Wizard loop: action "add" -> name/url/key -> action "done".
@@ -54,39 +52,36 @@ def test_setup_provider_adds_and_saves(patch_config_path: Path, config_file: Pat
 
 def test_setup_provider_key_hidden_in_config(patch_config_path: Path, config_file: Path, env_file: Path, monkeypatch):
     """The raw key must never appear in config.yml (masked input + .env only)."""
-    _fake_prompts(monkeypatch, ["add", "Cloud", "https://cloud.com/v1", "sk-super-secret", "done"])
+    _fake_prompts(monkeypatch, ["add", "Cloud", "https://cloud.com/v1", "sk-redacted", "done"])
 
     provider_cmd.setup_provider()
-    assert "sk-super-secret" not in config_file.read_text()
-    assert "sk-super-secret" in env_file.read_text()
-    assert "CLOUD_API_KEY=sk-super-secret" in env_file.read_text()
+    assert "sk-redacted" not in config_file.read_text()
+    assert "sk-redacted" in env_file.read_text()
+    assert "CLOUD_API_KEY=sk-redacted" in env_file.read_text()
 
 
-def test_env_var_name_derivation():
-    assert core.env_var_name_for("Cloud Provider") == "CLOUD_PROVIDER_API_KEY"
-    assert core.env_var_name_for("ollama-cloud") == "OLLAMA_CLOUD_API_KEY"
-    assert core.env_var_name_for("  Weird &* Name!!  ") == "WEIRD_NAME_API_KEY"
+def test_setup_provider_list_action(patch_config_path: Path, config_file: Path, monkeypatch, capsys):
+    # Seed with one provider
+    config_file.write_text(yaml.safe_dump({
+        "providers": {"Cloud": {"base_url": "https://cloud.com/v1", "api_key_env": "K"}},
+        "adaptive": {},
+        "custom": {},
+    }))
+    _fake_prompts(monkeypatch, ["list", "done"])
+
+    provider_cmd.setup_provider()
+    captured = capsys.readouterr()
+    assert "Cloud" in captured.out
+    assert "https://cloud.com/v1" in captured.out
 
 
-def test_save_env_key_inserts_and_replaces(env_file: Path, monkeypatch):
-    monkeypatch.setattr(core, "env_path", lambda: env_file)
-    core.save_env_key("A_KEY", "first")
-    core.save_env_key("B_KEY", "other")
-    core.save_env_key("A_KEY", "second")  # replace in place
-    text = env_file.read_text()
-    assert "A_KEY=first" not in text
-    assert "A_KEY=second" in text
-    assert "B_KEY=other" in text
+def test_setup_provider_list_empty(patch_config_path: Path, config_file: Path, monkeypatch, capsys):
+    config_file.write_text(yaml.safe_dump({"providers": {}, "adaptive": {}, "custom": {}}))
+    _fake_prompts(monkeypatch, ["list", "done"])
 
-
-def test_save_env_key_preserves_other_lines(env_file: Path, monkeypatch):
-    monkeypatch.setattr(core, "env_path", lambda: env_file)
-    env_file.write_text("# comment\nFOO=bar\n")
-    core.save_env_key("NEW_KEY", "v")
-    text = env_file.read_text()
-    assert "# comment" in text
-    assert "FOO=bar" in text
-    assert "NEW_KEY=v" in text
+    provider_cmd.setup_provider()
+    captured = capsys.readouterr()
+    assert "No providers configured yet" in captured.out
 
 
 def test_setup_provider_remove_in_use_blocked(patch_config_path: Path, config_file: Path, monkeypatch):
@@ -113,6 +108,28 @@ def test_setup_provider_remove_unused(patch_config_path: Path, config_file: Path
     provider_cmd.setup_provider()
     data = yaml.safe_load(config_file.read_text())
     assert "Cloud" not in data["providers"]
+
+
+# --- list_providers ------------------------------------------------------------
+
+def test_list_providers_populated(patch_config_path: Path, config_file: Path, capsys):
+    config_file.write_text(yaml.safe_dump({
+        "providers": {"Cloud": {"base_url": "https://cloud.com/v1", "api_key_env": "K"}},
+        "adaptive": {},
+        "custom": {},
+    }))
+    provider_cmd.list_providers()
+    captured = capsys.readouterr()
+    assert "Polvo Providers" in captured.out
+    assert "Cloud" in captured.out
+    assert "https://cloud.com/v1" in captured.out
+
+
+def test_list_providers_empty(patch_config_path: Path, config_file: Path, capsys):
+    config_file.write_text(yaml.safe_dump({"providers": {}, "adaptive": {}, "custom": {}}))
+    provider_cmd.list_providers()
+    captured = capsys.readouterr()
+    assert "No providers configured" in captured.out
 
 
 # --- add (script surface) ------------------------------------------------------

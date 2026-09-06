@@ -1,15 +1,10 @@
-"""Commands for managing custom models in Polvo.
-
-Custom models are extra endpoints that can be routed to by explicit ID,
-but are ignored by the adaptive classifier.
-"""
+"""Commands for managing custom models in Polvo."""
 from __future__ import annotations
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
-from rich.table import Table
 
 from . import core
 from model_router.models import ADAPTIVE_TIERS
@@ -124,35 +119,51 @@ def set_custom(
     effort: str | None = typer.Option(None, "--effort", "-e", help="Reasoning effort (e.g. 'medium', 'high')"),
 ) -> None:
     """Configure or update a custom model."""
-    if tier_key is None or model is None or provider is None:
+    # Resolve Typer Option/Argument defaults if function is called directly (e.g. in tests)
+    def resolve(v):
+        # Typer Option/Argument objects have a .default attribute
+        if hasattr(v, "default") and not isinstance(v, (str, int, float, bool, type(None))):
+            return v.default
+        # Also check for .info.default just in case
+        if hasattr(v, "info") and hasattr(v.info, "default"):
+            return v.info.default
+        return v
+
+    t_key = resolve(tier_key)
+    m_val = resolve(model)
+    p_val = resolve(provider)
+    n_val = resolve(name)
+    e_val = resolve(effort)
+
+    if t_key is None or m_val is None or p_val is None:
         err_console.print("[red]Usage: polvo custom set <key> --model <id> --provider <name>[/red]")
         err_console.print("Example: polvo custom set my-model --model some-id --provider 'Cloud Provider'")
         raise typer.Exit(code=1)
 
-    if tier_key in ADAPTIVE_TIERS:
-        err_console.print(f"[red]'{tier_key}' is an adaptive tier name. Use [bold]polvo tier[/bold] for it.[/red]")
+    if t_key in ADAPTIVE_TIERS:
+        err_console.print(f"[red]'{t_key}' is an adaptive tier name. Use [bold]polvo tier[/bold] for it.[/red]")
         raise typer.Exit(code=1)
 
     data = core.load_config()
     providers = data.get("providers") or {}
 
-    if provider not in providers:
-        err_console.print(f"[red]Error: Provider '{provider}' not found.[/red]")
+    if p_val not in providers:
+        err_console.print(f"[red]Error: Provider '{p_val}' not found.[/red]")
         err_console.print("Run 'polvo provider list' to see available providers.")
         raise typer.Exit(code=1)
 
-    spec = {"model": model, "provider": provider, "name": name}
+    spec = {"model": m_val, "provider": p_val, "name": n_val}
 
     extra_params = {}
-    if effort:
-        extra_params["reasoning_effort"] = effort
+    if isinstance(e_val, str) and e_val:
+        extra_params["reasoning_effort"] = e_val
     if extra_params:
         spec["extra_params"] = extra_params
 
-    spec = {k: v for k, v in spec.items() if v is not None}
+    final_spec = {k: v for k, v in spec.items() if v is not None}
 
     custom = data.get("custom") or {}
-    custom[tier_key] = spec
+    custom[t_key] = final_spec
     data["custom"] = custom
     core.save_config(data)
-    console.print(f"[green]✅ Custom model '{tier_key}' configured successfully.[/green]")
+    console.print(f"[green]✅ Custom model '{t_key}' configured successfully.[/green]")

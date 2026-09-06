@@ -128,7 +128,6 @@ def _list_adaptive_tiers(data: dict) -> None:
     if not adaptive:
         console.print("[yellow]No adaptive tiers configured yet.[/yellow]")
         return
-    console, _ = (console, None) # fix local scope
     console.print("[bold]Adaptive Tiers:[/bold]")
     for key, spec in adaptive.items():
         console.print(f"  • [bold]{key}[/bold]: {spec.get('model')} via {spec.get('provider')}")

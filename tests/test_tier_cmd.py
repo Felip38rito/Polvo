@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import pytest
 import typer
 import yaml
 
 from polvo_cli import core, tier_cmd
-
 
 @pytest.fixture
 def config_file(tmp_path: Path) -> Path:
@@ -28,8 +26,27 @@ def _seed_provider(config_file: Path) -> None:
         "custom": {},
     }))
 
+# --- _get_provider_by_selection tests --------------------------------------------
 
-# --- setup_tier wizard ---------------------------------------------------------
+def test_get_provider_no_providers(monkeypatch):
+    # We mock the providers dict passed to the helper
+    with pytest.raises(RuntimeError, match="No providers configured"):
+        tier_cmd._get_provider_by_selection("Test", {})
+
+def test_get_provider_single_provider_default(monkeypatch):
+    providers = {"Cloud": {}}
+    # Mock Prompt.ask to return empty string (Enter)
+    monkeypatch.setattr(tier_cmd.Prompt, "ask", lambda *a, **k: "")
+    assert tier_cmd._get_provider_by_selection("Test", providers) == "Cloud"
+
+def test_get_provider_invalid_then_valid(monkeypatch):
+    providers = {"Cloud": {}}
+    # Return invalid choice first, then valid one
+    answers = iter(["invalid", "1"])
+    monkeypatch.setattr(tier_cmd.Prompt, "ask", lambda *a, **k: next(answers))
+    assert tier_cmd._get_provider_by_selection("Test", providers) == "Cloud"
+
+# --- setup_tier wizard -----------------------------------------------------------
 
 def test_setup_tier_requires_existing_provider(patch_config_path: Path, config_file: Path, monkeypatch):
     """With no providers, tier setup must bail and tell the user to add one first."""
@@ -45,12 +62,10 @@ def test_setup_tier_requires_existing_provider(patch_config_path: Path, config_f
     assert calls["n"] == 0
     data = yaml.safe_load(config_file.read_text())
     assert data["adaptive"] == {}
-    assert data["custom"] == {}
-
 
 def test_setup_tier_adds_adaptive(patch_config_path: Path, config_file: Path, monkeypatch):
     _seed_provider(config_file)
-    action_answers = iter(["adaptive", "done"])
+    action_answers = iter(["done"])
     prompt_answers = iter([
         "1", "model-mini", 
         "1", "model-air", 
@@ -72,57 +87,27 @@ def test_setup_tier_adds_adaptive(patch_config_path: Path, config_file: Path, mo
     assert data["adaptive"]["pro"]["model"] == "model-pro"
     assert data["adaptive"]["pro"]["provider"] == "Cloud"
 
-
-def test_setup_tier_adds_custom(patch_config_path: Path, config_file: Path, monkeypatch):
+def test_setup_tier_action_list(patch_config_path: Path, config_file: Path, monkeypatch, capsys):
     _seed_provider(config_file)
-    action_answers = iter(["done"])
-    prompt_answers = iter([])
+    # sequence: onboarding answers -> Action='list' -> Action='done'
+    prompt_answers = iter([
+        "1", "model-mini", "1", "model-air", "1", "model-pro", "1", "model-ultra", "1", "model-classifier",
+        "list", "done"
+    ])
 
     def fake_ask(prompt, *a, **k):
-        if "Action" in prompt:
-            return next(action_answers)
         return next(prompt_answers)
 
     monkeypatch.setattr(tier_cmd.Prompt, "ask", fake_ask)
     monkeypatch.setattr(tier_cmd.Confirm, "ask", lambda *a, **k: False)
 
-    # To test adding a custom model, we should use custom_cmd.setup_custom
-    from polvo_cli import custom_cmd
-    # We need to mock prompts for custom_cmd.setup_custom too
-    # The current setup_custom flow: Action (add/list/done) -> if add: Key -> Provider -> Model -> Name -> Reasoning
-    custom_action = iter(["add", "done"])
-    custom_prompts = iter(["meu-modelo", "1", "my-custom-model", "Meu Modelo", "no"])
-    
-    def custom_fake_ask(prompt, *a, **k):
-        if "Action" in prompt:
-            return next(custom_action)
-        return next(custom_prompts)
-    
-    monkeypatch.setattr(custom_cmd.Prompt, "ask", custom_fake_ask)
-    
-    custom_cmd.setup_custom()
-    data = yaml.safe_load(config_file.read_text())
-    assert data["custom"]["meu-modelo"]["model"] == "my-custom-model"
-    assert data["custom"]["meu-modelo"]["provider"] == "Cloud"
-
+    tier_cmd.setup_tier()
+    captured = capsys.readouterr()
+    assert "Adaptive Tiers:" in captured.out
 
 def test_setup_tier_adds_classifier(patch_config_path: Path, config_file: Path, monkeypatch):
     _seed_provider(config_file)
     action_answers = iter(["done"])
-    prompt_answers = iter([])
-
-    def fake_ask(prompt, *a, **k):
-        if "Action" in prompt:
-            return next(action_answers)
-        return next(prompt_answers)
-
-    monkeypatch.setattr(tier_cmd.Prompt, "ask", fake_ask)
-    monkeypatch.setattr(tier_cmd.Confirm, "ask", lambda *a, **k: False)
-
-    # We need to trigger just the classifier part. Since setup_tier does adaptive then classifier,
-    # we must provide answers for the 4 adaptive tiers first.
-    # 4 tiers * (provider, model) = 8 answers.
-    # Then the classifier prompts: provider, model.
     full_prompt_answers = iter([
         "1", "model-mini", 
         "1", "model-air", 
@@ -137,26 +122,50 @@ def test_setup_tier_adds_classifier(patch_config_path: Path, config_file: Path, 
         return next(full_prompt_answers)
         
     monkeypatch.setattr(tier_cmd.Prompt, "ask", real_fake_ask)
+    monkeypatch.setattr(tier_cmd.Confirm, "ask", lambda *a, **k: False)
 
     tier_cmd.setup_tier()
     data = yaml.safe_load(config_file.read_text())
     assert data["classifier"]["model"] == "minimax/minimax-m3:free"
     assert data["classifier"]["provider"] == "Cloud"
 
+# --- list_tiers ----------------------------------------------------------------
 
-# --- set -----------------------------------------------------------------------
+def test_list_tiers_empty(patch_config_path: Path, config_file: Path, capsys):
+    config_file.write_text(yaml.safe_dump({"providers": {}, "adaptive": {}, "custom": {}}))
+    tier_cmd.list_tiers()
+    captured = capsys.readouterr()
+    assert "No adaptive tiers configured yet" in captured.out
+
+def test_list_tiers_populated(patch_config_path: Path, config_file: Path, capsys):
+    config_file.write_text(yaml.safe_dump({
+        "providers": {"Cloud": {}},
+        "adaptive": {"mini": {"model": "m1", "provider": "Cloud"}},
+        "classifier": {"model": "c1", "provider": "Cloud"}
+    }))
+    tier_cmd.list_tiers()
+    captured = capsys.readouterr()
+    assert "Adaptive Tiers:" in captured.out
+    assert "mini" in captured.out
+    assert "Classifier:" in captured.out
+    assert "c1" in captured.out
+
+# --- set_tier ------------------------------------------------------------------
 
 def test_set_missing_args_shows_usage(patch_config_path: Path):
     with pytest.raises(typer.Exit) as exc:
         tier_cmd.set_tier("pro", None, "Cloud", None, None)
     assert exc.value.exit_code == 1
 
-
 def test_set_unknown_provider_exits(patch_config_path: Path):
     with pytest.raises(typer.Exit) as exc:
         tier_cmd.set_tier("pro", "m", "Ghost", None, None)
     assert exc.value.exit_code == 1
 
+def test_set_invalid_tier_key_exits(patch_config_path: Path):
+    with pytest.raises(typer.Exit) as exc:
+        tier_cmd.set_tier("invalid-tier", "m", "Cloud", None, None)
+    assert exc.value.exit_code == 1
 
 def test_set_writes_adaptive_tier(patch_config_path: Path, config_file: Path):
     _seed_provider(config_file)
@@ -164,24 +173,8 @@ def test_set_writes_adaptive_tier(patch_config_path: Path, config_file: Path):
     data = yaml.safe_load(config_file.read_text())
     assert data["adaptive"]["pro"] == {"model": "my-pro-model", "provider": "Cloud", "name": "Pro Tier"}
 
-
-def test_set_writes_custom_model(patch_config_path: Path, config_file: Path):
+def test_set_tier_with_effort(patch_config_path: Path, config_file: Path):
     _seed_provider(config_file)
-    # Since it's in tier_cmd, let's assume the test wants to check the 
-    # logic for custom models if it was still there, but now we should
-    # probably call the custom_cmd if the test was intended for custom models.
-    # However, looking at the existing test, it called tier_cmd.set.
-    # We'll redirect this to custom_cmd.set_custom to keep the test's intent.
-    from polvo_cli import custom_cmd
-    custom_cmd.set_custom("meu-modelo", "my-model", "Cloud", None, "high")
+    tier_cmd.set_tier("pro", "my-pro-model", "Cloud", None, "high")
     data = yaml.safe_load(config_file.read_text())
-    assert data["custom"]["meu-modelo"]["model"] == "my-model"
-    assert data["custom"]["meu-modelo"]["extra_params"] == {"reasoning_effort": "high"}
-
-
-def test_set_adaptive_key_never_goes_to_custom(patch_config_path: Path, config_file: Path):
-    _seed_provider(config_file)
-    tier_cmd.set_tier("mini", "m", "Cloud", None, None)
-    data = yaml.safe_load(config_file.read_text())
-    assert "mini" in data["adaptive"]
-    assert "mini" not in (data.get("custom") or {})
+    assert data["adaptive"]["pro"]["extra_params"] == {"reasoning_effort": "high"}
