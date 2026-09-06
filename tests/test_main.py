@@ -5,15 +5,14 @@ from pathlib import Path
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
-from polvo_cli import config_cmd, main
-
+from polvo_cli import core, main
 
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
-
 
 @pytest.fixture
 def patch_polvoctl(monkeypatch):
@@ -26,7 +25,6 @@ def patch_polvoctl(monkeypatch):
     monkeypatch.setattr(main, "_run_polvoctl", fake_run)
     return calls
 
-
 # --- version ----------------------------------------------------------------
 
 def test_version(runner: CliRunner):
@@ -34,42 +32,7 @@ def test_version(runner: CliRunner):
     assert result.exit_code == 0
     assert "polvo" in result.output
 
-
-# --- config list / set ------------------------------------------------------
-
-def test_config_list(runner: CliRunner, monkeypatch, tmp_path: Path):
-    cfg = tmp_path / "config.yml"
-    cfg.write_text(
-        "adaptive:\n  mini:\n    model: gemma4:31b\n  air:\n    model: x\n"
-        "  pro:\n    model: y\n  ultra:\n    model: z\n"
-    )
-    monkeypatch.setattr(config_cmd, "config_path", lambda: cfg)
-    result = runner.invoke(main.app, ["config", "list"])
-    assert result.exit_code == 0
-    assert "gemma4:31b" in result.output
-
-
-def test_config_set_missing_args(runner: CliRunner):
-    result = runner.invoke(main.app, ["config", "set", "pro"])
-    assert result.exit_code == 1
-    assert "Usage" in result.output
-
-
-def test_config_unknown_action(runner: CliRunner):
-    result = runner.invoke(main.app, ["config", "bogus"])
-    assert result.exit_code == 1
-    assert "Unknown config action" in result.output
-
-
-def test_config_no_action_lists(runner: CliRunner, monkeypatch, tmp_path: Path):
-    """'polvo config' with no action should list, not error."""
-    cfg = tmp_path / "config.yml"
-    cfg.write_text("adaptive:\n  mini:\n    model: gemma4:31b\n")
-    monkeypatch.setattr(config_cmd, "config_path", lambda: cfg)
-    result = runner.invoke(main.app, ["config"])
-    assert result.exit_code == 0
-    assert "gemma4:31b" in result.output
-
+# --- models usage -------------------------------------------------------------
 
 def test_models_no_provider_shows_usage(runner: CliRunner, monkeypatch, tmp_path: Path):
     """'polvo models' with no provider should show available providers, not a raw error."""
@@ -77,24 +40,21 @@ def test_models_no_provider_shows_usage(runner: CliRunner, monkeypatch, tmp_path
 
     cfg = tmp_path / "config.yml"
     cfg.write_text("providers:\n  Ollama Cloud:\n    base_url: https://ollama.com/v1\n")
-    monkeypatch.setattr(validate, "config_path", lambda: cfg)
+    monkeypatch.setattr(core, "config_path", lambda: cfg)
     result = runner.invoke(main.app, ["models"])
     assert result.exit_code == 1
     assert "Usage: polvo models" in result.output
     assert "Ollama Cloud" in result.output
-
 
 def test_provider_add_no_args_shows_usage(runner: CliRunner):
     result = runner.invoke(main.app, ["provider", "add"])
     assert result.exit_code == 1
     assert "Usage: polvo provider add" in result.output
 
-
 def test_tier_set_no_args_shows_usage(runner: CliRunner):
     result = runner.invoke(main.app, ["tier", "set"])
     assert result.exit_code == 1
     assert "Usage: polvo tier set" in result.output
-
 
 # --- service lifecycle (via _run_polvoctl stub) ------------------------------
 
@@ -103,60 +63,50 @@ def ready(monkeypatch):
     """Stub config validation so service commands don't read the real config."""
     monkeypatch.setattr(main, "config_problems", lambda: [])
 
-
 def test_start(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["start"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["start"]]
-
 
 def test_install_with_port(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["install", "--port", "9001"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["install", "--port", "9001"]]
 
-
 def test_install_default_port(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["install"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["install", "--port", "9000"]]
-
 
 def test_uninstall(runner: CliRunner, patch_polvoctl):
     result = runner.invoke(main.app, ["uninstall"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["uninstall"]]
 
-
 def test_stop(runner: CliRunner, patch_polvoctl):
     result = runner.invoke(main.app, ["stop"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["stop"]]
-
 
 def test_restart(runner: CliRunner, patch_polvoctl, ready):
     result = runner.invoke(main.app, ["restart"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["restart"]]
 
-
 def test_status(runner: CliRunner, patch_polvoctl):
     result = runner.invoke(main.app, ["status"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["status"]]
-
 
 def test_logs(runner: CliRunner, patch_polvoctl):
     result = runner.invoke(main.app, ["logs"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["logs"]]
 
-
 def test_tail(runner: CliRunner, patch_polvoctl):
     result = runner.invoke(main.app, ["tail"])
     assert result.exit_code == 0
     assert patch_polvoctl == [["tail"]]
-
 
 # --- _run_polvoctl error handling --------------------------------------------
 
@@ -170,7 +120,6 @@ def test_run_polvoctl_nonzero_exit(monkeypatch):
         main._run_polvoctl("status")
     assert exc.value.exit_code == 3
 
-
 def test_run_polvoctl_file_not_found(monkeypatch):
     monkeypatch.setattr(main, "_find_polvoctl", lambda: Path("/fake/polvoctl.sh"))
     monkeypatch.setattr(
@@ -180,7 +129,6 @@ def test_run_polvoctl_file_not_found(monkeypatch):
         main._run_polvoctl("status")
     assert exc.value.exit_code == 1
 
-
 # --- _find_polvoctl ----------------------------------------------------------
 
 def test_find_polvoctl_missing_raises(monkeypatch):
@@ -189,7 +137,6 @@ def test_find_polvoctl_missing_raises(monkeypatch):
     with pytest.raises(typer.Exit) as exc:
         main._find_polvoctl()
     assert exc.value.exit_code == 1
-
 
 # --- config validation on start ----------------------------------------------
 
@@ -203,7 +150,6 @@ def test_start_blocks_when_config_incomplete(runner: CliRunner, patch_polvoctl, 
     assert "No providers configured" in result.output
     assert patch_polvoctl == []  # never reached polvoctl
 
-
 def test_install_blocks_when_config_incomplete(runner: CliRunner, patch_polvoctl, monkeypatch):
     monkeypatch.setattr(
         main, "config_problems", lambda: ["No tiers configured. Run 'polvo tier' to add one."]
@@ -211,8 +157,8 @@ def test_install_blocks_when_config_incomplete(runner: CliRunner, patch_polvoctl
     result = runner.invoke(main.app, ["install"])
     assert result.exit_code == 1
     assert "can't start" in result.output
+    assert "No tiers configured" in result.output
     assert patch_polvoctl == []
-
 
 # --- provider / tier wizards (no subcommand) ---------------------------------
 
@@ -223,7 +169,6 @@ def test_provider_no_subcommand_opens_wizard(runner: CliRunner, monkeypatch):
     assert result.exit_code == 0
     assert called["n"] == 1
 
-
 def test_tier_no_subcommand_opens_wizard(runner: CliRunner, monkeypatch):
     called = {"n": 0}
     monkeypatch.setattr(main, "setup_tier", lambda: called.update(n=1))
@@ -231,14 +176,12 @@ def test_tier_no_subcommand_opens_wizard(runner: CliRunner, monkeypatch):
     assert result.exit_code == 0
     assert called["n"] == 1
 
-
 def test_tiers_plural_alias_opens_wizard(runner: CliRunner, monkeypatch):
     called = {"n": 0}
     monkeypatch.setattr(main, "setup_tier", lambda: called.update(n=1))
     result = runner.invoke(main.app, ["tiers"])
     assert result.exit_code == 0
     assert called["n"] == 1
-
 
 def test_provider_subcommand_still_works(runner: CliRunner, monkeypatch):
     """'polvo provider list' must NOT open the wizard."""
@@ -248,3 +191,34 @@ def test_provider_subcommand_still_works(runner: CliRunner, monkeypatch):
     result = runner.invoke(main.app, ["provider", "list"])
     assert result.exit_code == 0
     assert called["n"] == 0
+
+# --- Onboarding Flow (Bare `polvo`) --------------------------------------------
+
+def test_bare_polvo_shows_overview_when_ready(runner: CliRunner, monkeypatch, tmp_path: Path):
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(yaml.safe_dump({
+        "providers": {"A": {"base_url": "x"}},
+        "adaptive": {"mini": {"model": "m", "provider": "A"}},
+        "classifier": {"model": "c", "provider": "A"},
+    }))
+    monkeypatch.setattr(core, "config_path", lambda: cfg)
+    result = runner.invoke(main.app, [])
+    assert result.exit_code == 0
+    assert "config ready" in result.output
+    assert "Providers:   A" in result.output
+
+def test_bare_polvo_triggers_wizard_when_missing_provider(runner: CliRunner, monkeypatch, tmp_path: Path):
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(yaml.safe_dump({"providers": {}, "adaptive": {}, "custom": {}}))
+    monkeypatch.setattr(core, "config_path", lambda: cfg)
+    called = {"add_first_provider": 0}
+
+    def fake_add_first():
+        called["add_first_provider"] += 1
+        raise typer.Exit(code=0)  # stop the onboarding right after step 1
+
+    monkeypatch.setattr(main, "add_first_provider", fake_add_first)
+    result = runner.invoke(main.app, [])
+    assert called["add_first_provider"] == 1
+    assert result.exit_code == 0
+    assert "You don't have providers yet" in result.output

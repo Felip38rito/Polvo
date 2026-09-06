@@ -165,8 +165,6 @@ def load_models_yaml(path: Path | None) -> RouterModels | None:
 
 @dataclass
 class Settings:
-    ollama_api_key: str
-    ollama_base_url: str = "https://ollama.com/v1"
     router_host: str = "127.0.0.1"
     router_port: int = 9000
     default_tier: str = "air"
@@ -182,24 +180,29 @@ class Settings:
         default_models_yaml: Path | None = None,
     ) -> "Settings":
         _load_dotenv(dotenv_path)
-        key = os.environ.get("OLLAMA_API_KEY", "").strip()
         require_auth = os.environ.get("ROUTER_API_KEY", "").strip()
 
         yaml_path_raw = os.environ.get("ROUTER_MODELS_YAML", "").strip()
         if yaml_path_raw:
             yaml_path: Path | None = Path(yaml_path_raw)
         else:
-            user_cfg = Path.home() / ".config" / "polvo" / "config.yml"
+            user_cfg = Path.home() / ".polvo" / "config.yml"
             if user_cfg.exists():
                 yaml_path = user_cfg
             else:
                 yaml_path = default_models_yaml
-        
-        models = load_models_yaml(yaml_path) or RouterModels()
+
+        try:
+            models = load_models_yaml(yaml_path) or RouterModels()
+        except ValueError as exc:
+            # In-progress config (e.g. mid-onboarding: providers but no models
+            # yet). Don't hard-crash — fall back to an empty table so the app
+            # can still assemble (CLI-level validation guards real startups).
+            import sys
+            print(f"polvo: config not ready ({exc}); starting with an empty model table.", file=sys.stderr)
+            models = RouterModels()
 
         return cls(
-            ollama_api_key=key,
-            ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "https://ollama.com/v1").rstrip("/"),
             router_host=os.environ.get("ROUTER_HOST", "127.0.0.1"),
             router_port=int(os.environ.get("ROUTER_PORT", "9000") or "9000"),
             default_tier=os.environ.get("ROUTER_DEFAULT_TIER", models.default_tier),
@@ -207,9 +210,3 @@ class Settings:
             require_auth=require_auth,
             models=models,
         )
-
-    @property
-    def effective_api_key(self) -> str:
-        if not self.ollama_api_key:
-            raise RuntimeError("OLLAMA_API_KEY is not set")
-        return self.ollama_api_key

@@ -29,7 +29,7 @@ def _default_models(*, provider: str = "default") -> RouterModels:
         providers={
             "default": ProviderSpec(
                 base_url="https://ollama.com/v1",
-                api_key_env="OLLAMA_API_KEY",
+                api_key="upstream-key",
             )
         },
     )
@@ -38,8 +38,6 @@ def _default_models(*, provider: str = "default") -> RouterModels:
 @pytest.fixture
 def client():
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=_default_models(),
     )
     return TestClient(_make_app(settings))
@@ -259,7 +257,7 @@ def test_optional_auth(client: TestClient):
 
 
 def test_required_auth_enforced():
-    settings = Settings(ollama_api_key="k", require_auth="router-secret", models=_default_models())
+    settings = Settings(require_auth="router-secret", models=_default_models())
     client = TestClient(_make_app(settings))
     assert client.get("/v1/models").status_code == 401
     ok = client.get("/v1/models", headers={"Authorization": "Bearer router-secret"})
@@ -295,8 +293,6 @@ def test_custom_models_yaml_drives_proxy(tmp_path, monkeypatch):
     )
     models = load_models_yaml(yaml_path)
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -359,9 +355,8 @@ def test_multi_provider_routes_to_correct_endpoint(tmp_path, monkeypatch):
         "  min_classify_len: 5\n"
     )
     models = load_models_yaml(yaml_path)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -432,8 +427,6 @@ def test_extra_params_merged_into_upstream_body(client: TestClient, monkeypatch)
         },
     )
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -496,8 +489,14 @@ def test_content_as_text_parts_routes(client: TestClient, monkeypatch):
     assert r.headers["X-Router-Tier"] == "mini"
 
 
-def test_no_user_message_falls_back_to_concat(client: TestClient, monkeypatch):
-    """When no user message exists, all string contents are concatenated."""
+def test_no_user_message_excludes_system_prompt(client: TestClient, monkeypatch):
+    """When no user message exists (tool-call continuation), the system prompt
+    must NOT feed the classifier — only non-system contents are used.
+
+    Regression: previously ALL string contents (including the Hermes system
+    prompt, full of pro/ultra keywords) were concatenated, so a tool-call
+    continuation routed to pro/ultra instead of the default tier.
+    """
     seen = {}
 
     async def fake_post(self, url, headers, **kw):
@@ -512,13 +511,15 @@ def test_no_user_message_falls_back_to_concat(client: TestClient, monkeypatch):
     payload = {
         "model": "adaptive",
         "messages": [
-            {"role": "system", "content": "hi"},
-            {"role": "assistant", "content": "hello"},
+            {"role": "system", "content": "You are Hermes Agent. Analyze codebase, concurrency, race conditions."},
+            {"role": "assistant", "content": "Let me check that."},
+            {"role": "tool", "content": "result: 42"},
         ],
     }
     r = client.post("/v1/chat/completions", json=payload)
     assert r.status_code == 200
-    # concatenated "hi\nhello" is short -> mini
+    # The system prompt is excluded; "Let me check that. result: 42" is short
+    # -> deterministic default (mini), NOT pro/ultra.
     assert seen["model"] == "gemma4:31b"
 
 
@@ -572,8 +573,6 @@ def test_custom_model_routes_directly(client: TestClient, monkeypatch):
         },
     )
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -613,8 +612,6 @@ def test_adaptive_without_adaptive_tiers_errors(client: TestClient):
         },
     )
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -642,8 +639,6 @@ def test_unknown_model_without_adaptive_errors(client: TestClient):
         },
     )
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))

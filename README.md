@@ -73,19 +73,13 @@ Install Polvo with a single command (works on macOS and Linux):
 curl -LsSf https://raw.githubusercontent.com/Felip38rito/Nexus/main/install.sh | sh
 ```
 
-The installer:
+The installer bootstraps `uv`, clones the repo into `~/.polvo`, installs the `polvo` CLI globally, and sets up the background service.
 
-1. Bootstraps `uv` if needed.
-2. Clones the repo into the **stable home** `~/.polvo`.
-3. Installs the `polvo` CLI globally via `uv tool install` (a real binary in
-   `~/.local/bin` — no PATH hacks).
-4. Installs the background service so the router starts at login.
-
-Then configure your provider and start:
+Then, simply run:
 
 ```bash
-polvo setup        # interactive: provider, tiers, reasoning levels
-polvo status       # is the router running?
+polvo           # Guided onboarding: Provider -> Tiers -> Classifier
+polvo status    # Check if the router is running
 curl localhost:9000/v1/models
 ```
 
@@ -113,50 +107,41 @@ directory:
 polvo version     # confirm it's installed
 ```
 
-### Guided setup
+### Guided onboarding
 
-The first step is usually `polvo setup`, which walks you through configuring
-providers, tiers, and reasoning levels interactively:
+If you run `polvo` without arguments, it detects what is missing from your 
+config and guides you through a linear setup:
 
 ```bash
-polvo setup
+polvo
 ```
 
-It asks for:
+The flow is: **Providers** $\rightarrow$ **The Adaptive Scale** $\rightarrow$ **Classifier**.
 
-1. **Provider** — name, `base_url`, and the env var holding the API key.
-2. **Tiers** — either *Polvo Omakase* (recommended defaults) or custom display
-   names, plus the model id for each tier (`mini`/`air`/`pro`/`ultra`).
-3. **Reasoning levels** — optionally attach `extra_params` (e.g.
-   `reasoning_effort: high`) to specific tiers.
+### Management commands
 
-The result is written to `~/.config/polvo/config.yml`, which the router reads
-automatically.
+Once configured, you can manage specific areas:
+
+```bash
+polvo provider    # Interactive wizard to add/remove providers
+polvo tier        # Interactive wizard for the adaptive scale (mini to ultra)
+polvo custom      # Interactive wizard for explicit custom models
+```
+
+Non-interactive subcommands are available for scripts:
+- `polvo provider add <name> --url <url> --env <VAR>`
+- `polvo tier set <key> --model <id> --provider <name>`
+- `polvo custom set <key> --model <id> --provider <name>`
 
 ### Service lifecycle
 
 ```bash
 polvo start      # start the router service
 polvo stop       # stop it
-polvo restart    # restart it
+polvo restart     # restart it
 polvo status     # is it running?
 polvo logs       # last 100 lines of logs
 polvo tail       # follow logs live
-```
-
-### Config management
-
-```bash
-polvo config list                 # show tier -> name -> model -> provider
-polvo config set pro --model <id> # change a tier's model id
-```
-
-### Example
-
-```bash
-polvo setup                       # configure providers + tiers
-polvo start                       # launch the router
-curl localhost:9000/v1/models    # custom names appear here
 ```
 
 ## Environment configuration

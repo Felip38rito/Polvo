@@ -104,12 +104,18 @@ async def _process_chat(
     if last_user_content is not None:
         prompt = last_user_content
     else:
+        # No user message (e.g. a tool-call continuation: system + assistant +
+        # tool). Classify by the last NON-system message so the system prompt
+        # never leaks into the classifier. If only a system message exists,
+        # there is nothing meaningful to classify — fall back to the default.
         parts: list[str] = []
         for msg in messages:
+            if msg.get("role") == "system":
+                continue
             content = msg.get("content")
             if isinstance(content, str):
                 parts.append(content)
-        prompt = "\n".join(parts)
+        prompt = "\n".join(parts) if parts else ""
 
     requested_model = body.get("model", "")
     known_tier = settings.models.tier_for_alias(requested_model)
@@ -152,7 +158,7 @@ async def _process_chat(
 
     target_url = f"{provider.base_url}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {provider.resolve_api_key(fallback=settings.ollama_api_key)}",
+        "Authorization": f"Bearer {provider.resolve_api_key()}",
         "Content-Type": "application/json",
     }
 

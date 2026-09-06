@@ -11,7 +11,8 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
-from .setup import config_path
+from . import core
+from model_router.config import load_models_yaml
 
 console = Console()
 # Console that writes to stderr, for error messages.
@@ -32,9 +33,7 @@ def _load_router_models() -> "RouterModels":
 
     Raises typer.Exit if the config is missing or malformed.
     """
-    from model_router.config import load_models_yaml
-
-    path = config_path()
+    path = core.config_path()
     if not path.exists():
         err_console.print(
             f"[red]No config found at {path}.[/red]\n"

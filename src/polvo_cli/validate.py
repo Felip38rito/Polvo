@@ -1,9 +1,8 @@
 """Config validation for the polvo CLI.
 
-Centralizes the "is the router ready to start?" checks so both `polvo start`
-and the interactive wizards can share them. Each check returns a human-readable
-problem string (or None if that check passes); the caller decides how to
-surface them.
+Centralizes the "is the router ready to start?" checks so `polvo start`,
+the onboarding flow (bare `polvo`), and the interactive wizards share them.
+Also hosts provider-usage checks shared by the removal paths.
 """
 from __future__ import annotations
 
@@ -12,16 +11,17 @@ from typing import Any
 
 import yaml
 
-from .setup import config_path
+from . import core
 
 
-def load_config(path: Path | None = None) -> dict[str, Any] | None:
+def load_config(path: Path | None = None) -> dict | None:
     """Load the user config as a dict, or None if missing/invalid.
 
-    Unlike the per-command `_load_config` helpers, this never raises and never
-    prints — it just returns None so callers can give a consistent message.
+    Unlike core.load_config (which returns an empty skeleton), this returns
+    None so callers can distinguish "no config" / "broken config" from
+    "empty config" and message accordingly.
     """
-    path = path or config_path()
+    path = path or core.config_path()
     if not path.exists():
         return None
     try:
@@ -39,9 +39,17 @@ def config_problems(path: Path | None = None) -> list[str]:
     like.
     """
     problems: list[str] = []
+    path = path or core.config_path()
+    if not path.exists():
+        problems.append("No config found. Run 'polvo provider' to add your first provider.")
+        return problems
+
     data = load_config(path)
     if data is None:
-        problems.append("No config found. Run 'polvo provider' to add your first provider.")
+        problems.append(
+            f"Config at {path} is malformed (invalid YAML or not a mapping). "
+            "Fix or remove it, then run 'polvo provider'."
+        )
         return problems
 
     providers = data.get("providers") or {}
@@ -65,3 +73,13 @@ def config_problems(path: Path | None = None) -> list[str]:
 def is_ready(path: Path | None = None) -> bool:
     """True if the config is complete enough to start the router."""
     return not config_problems(path)
+
+
+def provider_in_use(data: dict[str, Any], name: str) -> bool:
+    """True if any adaptive tier, custom model, or the classifier uses the provider."""
+    for block in ("adaptive", "custom"):
+        for spec in (data.get(block) or {}).values():
+            if isinstance(spec, dict) and spec.get("provider") == name:
+                return True
+    classifier = data.get("classifier") or {}
+    return isinstance(classifier, dict) and classifier.get("provider") == name

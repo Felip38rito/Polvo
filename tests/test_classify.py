@@ -98,7 +98,7 @@ async def test_llm_tier_maps_json():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(fake_handler))
     models = _models()
-    tier = await llm_tier("some long prompt", models, api_key="k", client=client)
+    tier = await llm_tier("some long prompt", models, api_key="k", base_url="https://ollama.com/v1", client=client)
     await client.aclose()
     assert tier == "pro"
 
@@ -117,7 +117,7 @@ async def test_llm_tier_handles_prose_around_json():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     models = _models()
-    tier = await llm_tier("some prompt", models, api_key="k", client=client)
+    tier = await llm_tier("some prompt", models, api_key="k", base_url="https://ollama.com/v1", client=client)
     await client.aclose()
     assert tier == "air"
 
@@ -129,7 +129,7 @@ async def test_llm_tier_fails_safe_to_none():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     models = _models()
-    tier = await llm_tier("some prompt", models, api_key="k", client=client)
+    tier = await llm_tier("some prompt", models, api_key="k", base_url="https://ollama.com/v1", client=client)
     await client.aclose()
     assert tier is None
 
@@ -151,7 +151,7 @@ async def test_llm_tier_retries_on_500_then_succeeds():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     models = _models()
-    tier = await llm_tier("some prompt", models, api_key="k", client=client)
+    tier = await llm_tier("some prompt", models, api_key="k", base_url="https://ollama.com/v1", client=client)
     await client.aclose()
     assert tier == "pro"
     assert calls["n"] == 2  # exactly one retry
@@ -165,7 +165,7 @@ async def test_llm_tier_empty_body_returns_none():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     models = _models()
-    tier = await llm_tier("some prompt", models, api_key="k", client=client)
+    tier = await llm_tier("some prompt", models, api_key="k", base_url="https://ollama.com/v1", client=client)
     await client.aclose()
     assert tier is None
 
@@ -183,7 +183,7 @@ async def test_llm_tier_non_json_content_type_returns_none():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     models = _models()
-    tier = await llm_tier("some prompt", models, api_key="k", client=client)
+    tier = await llm_tier("some prompt", models, api_key="k", base_url="https://ollama.com/v1", client=client)
     await client.aclose()
     assert tier is None
 
@@ -200,7 +200,7 @@ async def test_llm_tier_empty_content_returns_none():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     models = _models()
-    tier = await llm_tier("some prompt", models, api_key="k", client=client)
+    tier = await llm_tier("some prompt", models, api_key="k", base_url="https://ollama.com/v1", client=client)
     await client.aclose()
     assert tier is None
 

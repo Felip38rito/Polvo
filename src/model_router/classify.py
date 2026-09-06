@@ -101,7 +101,7 @@ Tier definitions:
 
 Decide by what EXECUTING the request requires, using this escalation axis:
 1. mini -> air: file scope. Single-file/mechanical work stays in mini; multi-file features and routine integrations move to air.
-2. air -> pro: clarity of path. If the implementation path is clear, it stays in air; if the solution must be discovered (analysis, debugging, design), it escalates to pro.
+2, air -> pro: clarity of path. If the implementation path is clear, it stays in air; if the solution must be discovered (analysis, debugging, design), it escalates to pro.
 3. pro -> ultra: scope. A hard but contained problem stays in pro; only whole-system synthesis or "impossible" problems reach ultra.
 
 Examples:
@@ -187,6 +187,11 @@ async def _parse_tier_response(resp: httpx.Response, models: "RouterModels") -> 
         return None
 
     candidate = str(obj.get("model", "")).strip().lower()
+    
+    # LOG THE CLASSIFIER DECISION FOR THE TAIL
+    log.info("CLASSIFIER_DECISION: prompt=%s | response=%s | picked=%s", 
+              "[MASKED]", str(obj), candidate)
+
     if models.is_adaptive(candidate):
         return candidate
     log.warning("LLM classifier returned unknown or non-adaptive tier %r", candidate)
@@ -197,7 +202,7 @@ async def llm_tier(
     models: "RouterModels",
     *,
     api_key: str,
-    base_url: str = "https://ollama.com/v1",
+    base_url: str,
     classifier_model: str = "gemma4:31b",
     client: httpx.AsyncClient | None = None,
 ) -> str | None:
@@ -258,7 +263,7 @@ async def classify(
     llm = await llm_tier(
         prompt,
         models=settings.models,
-        api_key=classifier_provider.resolve_api_key(fallback=settings.ollama_api_key),
+        api_key=classifier_provider.resolve_api_key(),
         base_url=classifier_provider.base_url,
         classifier_model=settings.models.classifier_model,
         client=client,

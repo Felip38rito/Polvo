@@ -229,5 +229,4 @@ def test_settings_from_env_without_models(tmp_path: Path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text("OLLAMA_API_KEY=secret\nROUTER_PORT=9999\n")
     s = Settings.from_env(env)
-    assert s.ollama_api_key == "secret"
     assert s.router_port == 9999

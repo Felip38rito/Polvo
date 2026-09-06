@@ -1,19 +1,11 @@
 # Model Router — configuração de modelos (tiers → modelos + providers).
 #
-# Este arquivo define QUAIS modelos cada tier aponta, QUAIS providers existem,
-# e os thresholds do classificador. Edite aqui e reinicie o router (ou aponte
-# para outro arquivo via ROUTER_MODELS_YAML no .env).
-#
-# IMPORTANTE: use os API ids REAIS do /v1/models (sem sufixo ":cloud" — esse é
-# alias do Hermes e daria 404 na API).
-
-# Tier padrão quando o classificador falha ou não decide.
-default_tier: air
+# Este arquivo é o FALLBACK usado quando ~/.polvo/config.yml não existe.
+# A config real vive em ~/.polvo/config.yml (gerenciada pelo `polvo` CLI).
+# Edite aqui apenas se quiser um default de repo; o CLI sobrescreve via wizard.
 
 # Providers disponíveis. Cada provider tem um base_url (endpoint OpenAI-compatível)
 # e o nome da env var que guarda a chave daquele provider.
-# Se você não definir este bloco, um provider "default" (Ollama Cloud) é usado
-# e todos os tiers apontam para ele.
 providers:
   default:
     base_url: https://ollama.com/v1
@@ -23,27 +15,30 @@ providers:
   local:
     base_url: http://localhost:11434/v1
     api_key_env: OLLAMA_API_KEY
-  # Exemplo: um segundo provider (descomente para usar).
-  # gemini:
-  #   base_url: https://generativelanguage.googleapis.com/v1beta
-  #   api_key_env: GEMINI_API_KEY
 
-# Opcional: name = alias de exibição/roteamento (aparece no /v1/models).
-# Opcional: description = override do prompt do classificador para este tier.
-#   Se ausente, usa a descrição embutida.
-tiers:
+# Tiers adaptativos (eixo fixo: mini/air/pro/ultra). O classificador só escolhe
+# entre estes. Cada um aponta para um provider acima.
+adaptive:
   mini:
     model: gemma4:31b
-    description: "fast/cheap - discussion + trivial/mechanical tasks"
+    provider: default
+    name: mini
   air:
     model: deepseek-v4-flash:0731
-    description: "default - day-to-day implementation"
+    provider: default
+    name: air
   pro:
     model: deepseek-v4-pro:0813
-    description: "raw coding power, hard debugging/refactors"
+    provider: default
+    name: pro
   ultra:
     model: kimi-k3
-    description: "deep synthesis, whole-architecture, adversarial analysis"
+    provider: default
+    name: ultra
+
+# Modelos custom (opcional): roteáveis por id explícito, nunca escolhidos pelo
+# classificador.
+custom: {}
 
 # Classificador.
 # - model: modelo usado na decisão qualitativa (JSON). É o decisor PRIMÁRIO.
