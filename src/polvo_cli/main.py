@@ -36,6 +36,9 @@ from .custom_cmd import (
     set_custom as set_custom,
     setup_custom,
 )
+from .agent_cmd import (
+    agent_app,
+)
 from .validate import config_problems
 
 app = typer.Typer(
@@ -240,6 +243,7 @@ tier_app = typer.Typer(
 )
 app.add_typer(tier_app, name="tier")
 app.add_typer(tier_app, name="tiers", hidden=True)
+app.add_typer(agent_app, name="agent")
 
 
 @tier_app.command("list")

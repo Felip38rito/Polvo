@@ -441,6 +441,22 @@ hermes config set model.aliases.ultra router/ultra
 > through it. To undo, restore the previous provider:
 > `hermes config set model.provider ollama-cloud` (or whichever you used).
 
+### VS Code Copilot (UI)
+
+The VS Code Copilot extension supports custom providers natively via the
+command palette — no third-party extension needed:
+
+1. Open the Command Palette (`Cmd+Shift+P`) and run **Chat: Manage Language
+   Models**.
+2. Click **Add Model** -> **OpenAI Compatible**.
+3. Set the **Base URL** to `http://127.0.0.1:9000/v1` and enter your key
+   (any value works when the router has no auth).
+4. Pick `adaptive` (the router decides the tier per request) or a specific
+   tier (`mini`, `air`, `pro`, `ultra`) from the chat model picker.
+
+> The selected port must match the one your Polvo service is bound to
+> (`ROUTER_PORT` in `~/.polvo/.env`, default `9000`).
+
 ### Copilot CLI
 
 The Copilot CLI speaks the **Responses API**, which the router implements
