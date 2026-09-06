@@ -70,6 +70,16 @@ def env_var_name_for(provider_name: str) -> str:
     return f"{slug or 'PROVIDER'}_API_KEY"
 
 
+def load_env_var(var_name: str, default: str | None = None) -> str | None:
+    """Read a variable from the .env file. Returns default if not found."""
+    path = env_path()
+    if not path.exists():
+        return default
+    for line in path.read_text().splitlines():
+        if line.startswith(f"{var_name}="):
+            return line.split("=", 1)[1].strip()
+    return default
+
 def save_env_key(var_name: str, value: str, path: Path | None = None) -> None:
     """Insert or replace KEY=value in the .env file (never prints the value)."""
     path = path or env_path()
