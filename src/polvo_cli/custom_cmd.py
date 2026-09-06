@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
@@ -77,7 +78,13 @@ def _list_custom_models(data: dict) -> None:
         return
     console.print("[bold]Custom Models:[/bold]")
     for key, spec in custom.items():
-        console.print(f"  • [bold]{key}[/bold]: {spec.get('model')} via {spec.get('provider')}")
+        # escape + highlight=False: user data (model ids like "gpt-4") must not
+        # be split by Rich's auto-highlighter or parsed as markup.
+        console.print(
+            f"  • [bold]{escape(str(key))}[/bold]: {escape(str(spec.get('model')))}"
+            f" via {escape(str(spec.get('provider')))}",
+            highlight=False,
+        )
 
 
 def _add_custom(data: dict, providers: dict) -> None:
