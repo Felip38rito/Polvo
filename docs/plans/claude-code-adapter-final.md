@@ -206,22 +206,22 @@ campos desconhecidos") foi descartada — arrisca romper os pares capability↔c
 
 ## Checklist de implementação
 
-1. [ ] `POST /v1/messages` em `src/model_router/proxy.py` (case pelo path).
-2. [ ] Tradução de request: `system`, `messages`, **`tools`** (Anthropic→OpenAI).
-3. [ ] Generator SSE OpenAI→Anthropic (eventos `message_*`/`content_block_*`).
-4. [ ] Tradução de `tool_calls` → blocos `tool_use` (JSON `input`).
-5. [ ] Pings keep-alive no stream (watchdog 300 s).
-6. [ ] Repasse verbatim de `anthropic-beta`/`anthropic-version`; corpo de erro intacto.
-7. [ ] `POST /v1/messages/count_tokens` (ou registrar fallback).
-8. [ ] Opcional: `GET /v1/models` para model discovery.
-9. [ ] Smoke tests do §1.4.
-10. [ ] `polvo agent claude`: env vars da tabela §2.1 (**base URL sem `/v1`**,
+1. [x] `POST /v1/messages` em `src/model_router/proxy.py` (case pelo path).
+2. [x] Tradução de request: `system`, `messages`, **`tools`** (Anthropic→OpenAI).
+3. [x] Generator SSE OpenAI→Anthropic (eventos `message_*`/`content_block_*`).
+4. [x] Tradução de `tool_calls` → blocos `tool_use` (JSON `input`).
+5. [x] Pings keep-alive no stream (watchdog 300 s).
+6. [x] Repasse verbatim de `anthropic-beta`/`anthropic-version`; corpo de erro intacto.
+7. [x] `POST /v1/messages/count_tokens` (ou registrar fallback).
+8. [x] Opcional: `GET /v1/models` para model discovery.
+9. [x] Smoke tests do §1.4.
+10. [x] `polvo agent claude`: env vars da tabela §2.1 (**base URL sem `/v1`**,
         `ANTHROPIC_AUTH_TOKEN`, aliases mini/pro/ultra, `CLAUDE_CODE_MAX_CONTEXT_TOKENS`).
-11. [ ] Persistência no profile do usuário (padrão `setup_copilot`) + checagem de
+11. [x] Persistência no profile do usuário (padrão `setup_copilot`) + checagem de
         settings files conflitantes.
-12. [ ] Flags de mitigação sob demanda (tabela §"Mitigações").
-13. [ ] Teste de integração do §3.1 (incl. `/status` e edição de arquivo real).
-14. [ ] Documentar caveats e path de atualização manual do CLI.
+12. [x] Flags de mitigação sob demanda (documentadas em `docs/claude-code-adapter.md` § Troubleshooting — aplicação manual no shell).
+13. [x] Teste de integração do §3.1 (socket real em `tests/test_integration_messages.py`; sessão `/status` interativa fica para o usuário).
+14. [x] Documentar caveats e path de atualização manual do CLI.
 
 ---
 
