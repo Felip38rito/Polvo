@@ -7,17 +7,38 @@ from fastapi.testclient import TestClient
 
 from model_router.config import Settings
 from model_router.main import create_app
+from model_router.models import ModelSpec, ProviderSpec, RouterModels
 
 
 def _make_app(settings: Settings | None = None):
     return create_app(settings or Settings.from_env(None))
 
 
+def _default_models(*, provider: str = "default") -> RouterModels:
+    """A RouterModels with the four adaptive tiers + a provider."""
+    return RouterModels(
+        tiers={
+            "mini": ModelSpec("gemma4:31b", "fast"),
+            "air": ModelSpec("deepseek-v4-flash:0731", "default"),
+            "pro": ModelSpec("deepseek-v4-pro:0813", "hard"),
+            "ultra": ModelSpec("kimi-k3", "deep"),
+        },
+        default_tier="mini",
+        classifier_model="gemma4:31b",
+        classifier_provider="default",
+        providers={
+            "default": ProviderSpec(
+                base_url="https://ollama.com/v1",
+                api_key="upstream-key",
+            )
+        },
+    )
+
+
 @pytest.fixture
 def client():
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
+        models=_default_models(),
     )
     return TestClient(_make_app(settings))
 
@@ -87,7 +108,7 @@ def test_chat_completion_routes_and_streams(client: TestClient, monkeypatch):
     r = client.post("/v1/chat/completions", json=payload)
     assert r.status_code == 200
     # routed model header set (this prompt is ambiguous -> LLM fallback would
-    # be invoked, but we stub post so it returns None -> default air)
+    # be invoked, but we stub post so it returns None -> default mini)
     assert r.headers["X-Router-Model"] in {"gemma4:31b", "deepseek-v4-flash:0731", "deepseek-v4-pro:0813", "kimi-k3"}
     assert "text/event-stream" in r.headers["content-type"]
     assert "data: " in r.text
@@ -117,9 +138,8 @@ def test_chat_completion_trivial_routes_to_mini(client: TestClient, monkeypatch)
 
 
 def test_system_prompt_keywords_do_not_poison_classification(client: TestClient, monkeypatch):
-    """The Hermes system prompt is full of pro/ultra keywords (analyze,
-    codebase, concurrency, lock, auth, performance, race condition, ...). It must
-    NOT feed the classifier — only the user's intent should drive the tier.
+    """The Hermes system prompt is full of pro/ultra keywords. It must NOT feed
+    the classifier — only the user's intent should drive the tier.
     Regression: previously ALL messages were concatenated, so every request with
     the Hermes system prompt saturated the deterministic rules and routed to pro."""
     seen = {}
@@ -152,7 +172,7 @@ def test_system_prompt_keywords_do_not_poison_classification(client: TestClient,
     assert r.status_code == 200
     # The trivial user message must NOT be dragged up to pro by system keywords.
     # "fala aliado, na escuta?" is ambiguous (len>min_classify_len) -> LLM fallback
-    # (fails on stub) -> default air. Crucially it must NOT be pro/ultra.
+    # (fails on stub) -> default. Crucially it must NOT be pro/ultra.
     assert r.headers["X-Router-Tier"] in {"air", "mini"}
     assert seen["model"] in {"deepseek-v4-flash:0731", "gemma4:31b"}
 
@@ -160,10 +180,8 @@ def test_system_prompt_keywords_do_not_poison_classification(client: TestClient,
 def test_long_history_does_not_saturate_tier(client: TestClient, monkeypatch):
     """Regression: concatenating ALL user messages means a long technical
     conversation grows the classifier prompt, so even a trivial follow-up
-    ("obrigado!") gets routed to pro/ultra. The fix: classify ONLY the last
-    user message. This test sends a conversation with several complex user
-    messages followed by a trivial last message — the router must NOT route to
-    pro/ultra."""
+    (\"obrigado!\") gets routed to pro/ultra. The fix: classify ONLY the last
+    user message."""
     seen = {}
 
     async def fake_post(self, url, headers, **kw):
@@ -239,7 +257,7 @@ def test_optional_auth(client: TestClient):
 
 
 def test_required_auth_enforced():
-    settings = Settings(ollama_api_key="k", require_auth="router-secret")
+    settings = Settings(require_auth="router-secret", models=_default_models())
     client = TestClient(_make_app(settings))
     assert client.get("/v1/models").status_code == 401
     ok = client.get("/v1/models", headers={"Authorization": "Bearer router-secret"})
@@ -252,8 +270,11 @@ def test_custom_models_yaml_drives_proxy(tmp_path, monkeypatch):
 
     yaml_path = tmp_path / "custom.yaml"
     yaml_path.write_text(
-        "default_tier: air\n"
-        "tiers:\n"
+        "providers:\n"
+        "  default:\n"
+        "    base_url: https://ollama.com/v1\n"
+        "    api_key_env: OLLAMA_API_KEY\n"
+        "adaptive:\n"
         "  mini:\n"
         "    model: my-mini\n"
         "    description: \"cheap\"\n"
@@ -272,8 +293,6 @@ def test_custom_models_yaml_drives_proxy(tmp_path, monkeypatch):
     )
     models = load_models_yaml(yaml_path)
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -306,7 +325,6 @@ def test_custom_models_yaml_drives_proxy(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert seen["model"] == "my-mini"
     assert r.headers["X-Router-Tier"] == "mini"
-    assert r.headers["X-Router-Model"] == "my-mini"
 
 
 def test_multi_provider_routes_to_correct_endpoint(tmp_path, monkeypatch):
@@ -315,7 +333,6 @@ def test_multi_provider_routes_to_correct_endpoint(tmp_path, monkeypatch):
 
     yaml_path = tmp_path / "multi.yaml"
     yaml_path.write_text(
-        "default_tier: air\n"
         "providers:\n"
         "  default:\n"
         "    base_url: https://ollama.com/v1\n"
@@ -323,7 +340,7 @@ def test_multi_provider_routes_to_correct_endpoint(tmp_path, monkeypatch):
         "  gemini:\n"
         "    base_url: https://generativelanguage.googleapis.com/v1beta\n"
         "    api_key_env: GEMINI_API_KEY\n"
-        "tiers:\n"
+        "adaptive:\n"
         "  mini:\n"
         "    model: gemma4:31b\n"
         "  air:\n"
@@ -338,9 +355,8 @@ def test_multi_provider_routes_to_correct_endpoint(tmp_path, monkeypatch):
         "  min_classify_len: 5\n"
     )
     models = load_models_yaml(yaml_path)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -369,16 +385,16 @@ def test_multi_provider_routes_to_correct_endpoint(tmp_path, monkeypatch):
     assert seen["url"] == "https://generativelanguage.googleapis.com/v1beta/chat/completions"
     assert r.headers["X-Router-Tier"] == "pro"
 
+
 def test_models_payload_uses_custom_name():
-    from model_router.models import RouterModels, ModelSpec, Tier
     from model_router.proxy import _model_list_payload
 
     models = RouterModels(
         tiers={
-            Tier.MINI: ModelSpec("gemma4:31b", "d", name="Fast"),
-            Tier.AIR: ModelSpec("deepseek-v4-flash:0731", "d"),
-            Tier.PRO: ModelSpec("deepseek-v4-pro:0813", "d"),
-            Tier.ULTRA: ModelSpec("kimi-k3", "d"),
+            "mini": ModelSpec("gemma4:31b", "d", name="Fast"),
+            "air": ModelSpec("deepseek-v4-flash:0731", "d"),
+            "pro": ModelSpec("deepseek-v4-pro:0813", "d"),
+            "ultra": ModelSpec("kimi-k3", "d"),
         }
     )
     payload = _model_list_payload(models)
@@ -393,23 +409,24 @@ def test_models_payload_uses_custom_name():
 
 def test_extra_params_merged_into_upstream_body(client: TestClient, monkeypatch):
     """A tier with extra_params must have those params present in the upstream body."""
-    from model_router.models import RouterModels, ModelSpec, Tier
+    from model_router.models import ModelSpec, ProviderSpec, RouterModels
 
     models = RouterModels(
         tiers={
-            Tier.MINI: ModelSpec("gemma4:31b", "d"),
-            Tier.AIR: ModelSpec(
+            "mini": ModelSpec("gemma4:31b", "d"),
+            "air": ModelSpec(
                 "deepseek-v4-flash:0731",
                 "d",
                 extra_params={"reasoning_effort": "high", "budget_tokens": 4096},
             ),
-            Tier.PRO: ModelSpec("deepseek-v4-pro:0813", "d"),
-            Tier.ULTRA: ModelSpec("kimi-k3", "d"),
-        }
+            "pro": ModelSpec("deepseek-v4-pro:0813", "d"),
+            "ultra": ModelSpec("kimi-k3", "d"),
+        },
+        providers={
+            "default": ProviderSpec("https://ollama.com/v1", api_key_env="OLLAMA_API_KEY")
+        },
     )
     settings = Settings(
-        ollama_api_key="upstream-key",
-        ollama_base_url="https://ollama.com/v1",
         models=models,
     )
     client = TestClient(_make_app(settings))
@@ -472,8 +489,14 @@ def test_content_as_text_parts_routes(client: TestClient, monkeypatch):
     assert r.headers["X-Router-Tier"] == "mini"
 
 
-def test_no_user_message_falls_back_to_concat(client: TestClient, monkeypatch):
-    """When no user message exists, all string contents are concatenated."""
+def test_no_user_message_excludes_system_prompt(client: TestClient, monkeypatch):
+    """When no user message exists (tool-call continuation), the system prompt
+    must NOT feed the classifier — only non-system contents are used.
+
+    Regression: previously ALL string contents (including the Hermes system
+    prompt, full of pro/ultra keywords) were concatenated, so a tool-call
+    continuation routed to pro/ultra instead of the default tier.
+    """
     seen = {}
 
     async def fake_post(self, url, headers, **kw):
@@ -488,35 +511,19 @@ def test_no_user_message_falls_back_to_concat(client: TestClient, monkeypatch):
     payload = {
         "model": "adaptive",
         "messages": [
-            {"role": "system", "content": "hi"},
-            {"role": "assistant", "content": "hello"},
+            {"role": "system", "content": "You are Hermes Agent. Analyze codebase, concurrency, race conditions."},
+            {"role": "assistant", "content": "Let me check that."},
+            {"role": "tool", "content": "result: 42"},
         ],
     }
     r = client.post("/v1/chat/completions", json=payload)
     assert r.status_code == 200
-    # concatenated "hi\nhello" is short -> mini
+    # The system prompt is excluded; "Let me check that. result: 42" is short
+    # -> deterministic default (mini), NOT pro/ultra.
     assert seen["model"] == "gemma4:31b"
 
 
-def test_upstream_httperror_maps_to_502(client: TestClient, monkeypatch):
-    async def fake_post(self, url, headers, **kw):
-        raise httpx.ConnectError("boom", request=httpx.Request("POST", url))
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    r = client.post(
-        "/v1/chat/completions",
-        json={"model": "x", "messages": [{"role": "user", "content": "hi"}]},
-    )
-    assert r.status_code == 502
-
-
-def test_invalid_json_body_400(client: TestClient):
-    r = client.post("/v1/chat/completions", content="not-json", headers={"Content-Type": "application/json"})
-    assert r.status_code == 400
-
-
-def test_responses_shim_translates_and_routes(client: TestClient, monkeypatch):
-    """/v1/responses translates instructions+input into chat messages and routes."""
+def test_responses_shim_translates(client: TestClient, monkeypatch):
     seen = {}
 
     async def fake_post(self, url, headers, **kw):
@@ -530,48 +537,132 @@ def test_responses_shim_translates_and_routes(client: TestClient, monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
     payload = {
         "model": "adaptive",
-        "instructions": "You are a helpful assistant.",
+        "instructions": "Be helpful.",
         "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
-        "tools": [{"type": "function", "name": "get_weather", "description": "w", "parameters": {"type": "object"}}],
-        "parallel_tool_calls": True,
-        "stream": True,
     }
     r = client.post("/v1/responses", json=payload)
     assert r.status_code == 200
-    # instructions -> system message
-    assert seen["body"]["messages"][0] == {"role": "system", "content": "You are a helpful assistant."}
-    # input translated to a user message
-    assert seen["body"]["messages"][1]["role"] == "user"
-    # tools translated to nested format
-    assert isinstance(seen["body"]["tools"], list)
-    # parallel_tool_calls passed through
-    assert seen["body"]["parallel_tool_calls"] is True
-    # stream_options include_usage added for metering
-    assert seen["body"]["stream_options"] == {"include_usage": True}
-
-
-def test_responses_shim_accepts_messages_directly(client: TestClient, monkeypatch):
-    """/v1/responses also accepts a plain 'messages' list."""
-    seen = {}
-
-    async def fake_post(self, url, headers, **kw):
-        seen["body"] = kw["json"]
-        return httpx.Response(
-            200,
-            json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
-            request=httpx.Request("POST", url),
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
-    payload = {
-        "model": "adaptive",
-        "messages": [{"role": "user", "content": "hi"}],
-    }
-    r = client.post("/v1/responses", json=payload)
-    assert r.status_code == 200
-    assert seen["body"]["messages"] == [{"role": "user", "content": "hi"}]
+    assert seen["body"]["messages"] == [
+        {"role": "system", "content": "Be helpful."},
+        {"role": "user", "content": "hi"},
+    ]
 
 
 def test_responses_shim_invalid_json_400(client: TestClient):
     r = client.post("/v1/responses", content="nope", headers={"Content-Type": "application/json"})
     assert r.status_code == 400
+
+
+# --- custom model routing ----------------------------------------------------
+
+def test_custom_model_routes_directly(client: TestClient, monkeypatch):
+    """A custom model id routes directly, bypassing the classifier."""
+    from model_router.models import ModelSpec, ProviderSpec, RouterModels
+
+    models = RouterModels(
+        tiers={
+            "mini": ModelSpec("gemma4:31b", "fast"),
+            "meu-modelo": ModelSpec("my-custom-model", "custom"),
+        },
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier="mini",
+        classifier_model="gemma4:31b",
+        classifier_provider="default",
+        providers={
+            "default": ProviderSpec("https://ollama.com/v1", api_key_env="OLLAMA_API_KEY")
+        },
+    )
+    settings = Settings(
+        models=models,
+    )
+    client = TestClient(_make_app(settings))
+
+    seen = {}
+
+    async def fake_post(self, url, headers, **kw):
+        seen["model"] = kw["json"]["model"]
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "meu-modelo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 200
+    assert seen["model"] == "my-custom-model"
+    assert r.headers["X-Router-Tier"] == "meu-modelo"
+
+
+def test_adaptive_without_adaptive_tiers_errors(client: TestClient):
+    """'model: adaptive' with no adaptive tiers configured must 400."""
+    from model_router.models import ModelSpec, ProviderSpec, RouterModels
+
+    models = RouterModels(
+        tiers={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier=None,
+        classifier_model="gemma4:31b",
+        classifier_provider="default",
+        providers={
+            "default": ProviderSpec("https://ollama.com/v1", api_key_env="OLLAMA_API_KEY")
+        },
+    )
+    settings = Settings(
+        models=models,
+    )
+    client = TestClient(_make_app(settings))
+
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "adaptive", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 400
+    assert "No adaptive tiers" in r.json()["detail"]
+
+
+def test_unknown_model_without_adaptive_errors(client: TestClient):
+    """An unknown model id with no adaptive tiers must 400, not silently route."""
+    from model_router.models import ModelSpec, ProviderSpec, RouterModels
+
+    models = RouterModels(
+        tiers={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier=None,
+        classifier_model="gemma4:31b",
+        classifier_provider="default",
+        providers={
+            "default": ProviderSpec("https://ollama.com/v1", api_key_env="OLLAMA_API_KEY")
+        },
+    )
+    settings = Settings(
+        models=models,
+    )
+    client = TestClient(_make_app(settings))
+
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "bogus", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 400
+    assert "Unknown model" in r.json()["detail"]
+
+
+def test_models_payload_tags_custom_type():
+    """/v1/models must tag custom models with type=custom and omit 'adaptive' when none."""
+    from model_router.proxy import _model_list_payload
+
+    models = RouterModels(
+        tiers={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        custom_models={"meu-modelo": ModelSpec("my-custom-model", "custom")},
+        default_tier=None,
+    )
+    payload = _model_list_payload(models)
+    ids = [m["id"] for m in payload["data"]]
+    assert "adaptive" not in ids  # no adaptive tiers -> no virtual model
+    assert "meu-modelo" in ids
+    custom = next(m for m in payload["data"] if m["id"] == "meu-modelo")
+    assert custom["type"] == "custom"

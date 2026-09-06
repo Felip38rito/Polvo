@@ -3,6 +3,8 @@
 Settings are read from the environment (optionally from a `.env` file loaded
 by the caller). See `.env.example`.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -10,15 +12,11 @@ from pathlib import Path
 import yaml
 
 from .models import (
-    DEFAULT_PROVIDERS,
-    DEFAULT_TIER,
     ModelSpec,
     ProviderSpec,
     RouterModels,
-    Tier,
-    _DEFAULT_TABLE,
+    ADAPTIVE_TIERS,
 )
-
 
 def _load_dotenv(path: Path | None) -> None:
     if path is None or not path.exists():
@@ -32,19 +30,22 @@ def _load_dotenv(path: Path | None) -> None:
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
 
-
 def load_models_yaml(path: Path | None) -> RouterModels | None:
     """Load a model table + classifier config from a YAML file.
 
     Returns None if the file is missing. Raises if the file is malformed or
-    references an unknown tier/provider. This lets the router's model set be
-    configured without touching code.
+    references an unknown tier/provider.
 
-    The YAML may define a ``providers:`` block mapping a provider name to its
-    ``base_url`` and ``api_key_env``. Each tier (and the classifier) can then
-    reference one of those providers via ``provider: <name>``. If no
-    ``providers:`` block is given, a single ``default`` provider (Ollama Cloud)
-    is used and every tier points at it — preserving the original behavior.
+    The YAML defines a ``providers:`` block mapping a provider name to its
+    ``base_url`` and ``api_key_env``/``api_key``. Models live in two blocks:
+
+    - ``adaptive:`` — the fixed axis (mini/air/pro/ultra). Keys must be one of
+      the four adaptive names. The classifier only ever picks among these.
+    - ``custom:`` — any extra models the user wants available. Keys are free
+      strings; they are routable by explicit model id but never chosen by the
+      classifier.
+
+    Each model entry references a provider via ``provider: <name>``.
     """
     if path is None or not path.exists():
         return None
@@ -53,75 +54,108 @@ def load_models_yaml(path: Path | None) -> RouterModels | None:
         raise ValueError(f"Malformed models YAML at {path}: expected a mapping")
 
     # --- Providers ---
-    providers: dict[str, ProviderSpec] = dict(DEFAULT_PROVIDERS)
+    providers: dict[str, ProviderSpec] = {}
     raw_providers = data.get("providers") or {}
-    if raw_providers:
-        if not isinstance(raw_providers, dict):
-            raise ValueError("'providers' must be a mapping")
-        providers = {}
-        for name, pcfg in raw_providers.items():
-            if not isinstance(pcfg, dict) or not pcfg.get("base_url"):
-                raise ValueError(f"Provider '{name}' must define a 'base_url'")
-            providers[str(name)] = ProviderSpec(
-                base_url=str(pcfg["base_url"]).rstrip("/"),
-                api_key=str(pcfg["api_key"]) if pcfg.get("api_key") else None,
-                api_key_env=str(pcfg.get("api_key_env", "OLLAMA_API_KEY")) if "api_key_env" in pcfg else None,
-            )
-        # Always ensure a "default" provider exists so tiers that don't specify
-        # one (or the classifier) still resolve.
-        providers.setdefault("default", DEFAULT_PROVIDERS["default"])
+    if not isinstance(raw_providers, dict):
+        raise ValueError("'providers' must be a mapping")
+    for name, pcfg in raw_providers.items():
+        if not isinstance(pcfg, dict) or not pcfg.get("base_url"):
+            raise ValueError(f"Provider '{name}' must define a 'base_url'")
+        providers[str(name)] = ProviderSpec(
+            base_url=str(pcfg["base_url"]).rstrip("/"),
+            api_key=str(pcfg["api_key"]) if pcfg.get("api_key") else None,
+            api_key_env=str(pcfg.get("api_key_env")) if "api_key_env" in pcfg else None,
+        )
 
-    # --- Tiers ---
-    tiers: dict[Tier, ModelSpec] = {}
-    raw_tiers = data.get("tiers") or {}
-    if not isinstance(raw_tiers, dict):
-        raise ValueError("'tiers' must be a mapping")
-    for tier_key, spec in raw_tiers.items():
-        try:
-            tier = Tier(str(tier_key))
-        except ValueError:
-            raise ValueError(f"Unknown tier '{tier_key}' in {path}")
+    # --- Adaptive tiers ---
+    tiers: dict[str, ModelSpec] = {}
+    raw_adaptive = data.get("adaptive") or {}
+    if not isinstance(raw_adaptive, dict):
+        raise ValueError("'adaptive' must be a mapping")
+    for tier_key, spec in raw_adaptive.items():
+        tier_key = str(tier_key)
+        if tier_key not in ADAPTIVE_TIERS:
+            raise ValueError(
+                f"Unknown adaptive tier '{tier_key}' in {path}. "
+                f"Adaptive tiers are fixed: {', '.join(ADAPTIVE_TIERS)}."
+            )
         if not isinstance(spec, dict) or not spec.get("model"):
-            raise ValueError(f"Tier '{tier_key}' must define a 'model'")
+            raise ValueError(f"Adaptive tier '{tier_key}' must define a 'model'")
         provider = str(spec.get("provider", "default"))
         if provider not in providers:
-            raise ValueError(
-                f"Tier '{tier_key}' references unknown provider '{provider}' in {path}"
-            )
+            raise ValueError(f"Adaptive tier '{tier_key}' references unknown provider '{provider}' in {path}")
         extra_params = spec.get("extra_params", {})
         if not isinstance(extra_params, dict):
             raise ValueError(f"extra_params for tier '{tier_key}' must be a mapping")
-        tiers[tier] = ModelSpec(
+        tiers[tier_key] = ModelSpec(
             api_id=str(spec["model"]),
-            description=str(spec.get("description", _DEFAULT_TABLE[tier].description)),
+            description=str(spec.get("description", "")),
             provider=provider,
             name=str(spec["name"]) if spec.get("name") else None,
             extra_params=extra_params,
         )
 
-    # Require all four tiers.
-    for tier in Tier:
-        if tier not in tiers:
-            raise ValueError(f"Missing tier '{tier.value}' in models YAML {path}")
+    # --- Custom models ---
+    custom_models: dict[str, ModelSpec] = {}
+    raw_custom = data.get("custom") or {}
+    if not isinstance(raw_custom, dict):
+        raise ValueError("'custom' must be a mapping")
+    for tier_key, spec in raw_custom.items():
+        tier_key = str(tier_key)
+        if tier_key in ADAPTIVE_TIERS:
+            raise ValueError(
+                f"Custom model '{tier_key}' collides with an adaptive tier name in {path}. "
+                f"Use the 'adaptive' block for adaptive tiers."
+            )
+        if not isinstance(spec, dict) or not spec.get("model"):
+            raise ValueError(f"Custom model '{tier_key}' must define a 'model'")
+        provider = str(spec.get("provider", "default"))
+        if provider not in providers:
+            raise ValueError(f"Custom model '{tier_key}' references unknown provider '{provider}' in {path}")
+        extra_params = spec.get("extra_params", {})
+        if not isinstance(extra_params, dict):
+            raise ValueError(f"extra_params for custom model '{tier_key}' must be a mapping")
+        custom_models[tier_key] = ModelSpec(
+            api_id=str(spec["model"]),
+            description=str(spec.get("description", "")),
+            provider=provider,
+            name=str(spec["name"]) if spec.get("name") else None,
+            extra_params=extra_params,
+        )
+
+    # Merge custom into the unified tiers dict (custom keys never collide with
+    # adaptive keys — enforced above).
+    tiers.update(custom_models)
+
+    if not tiers:
+        raise ValueError(f"At least one model must be configured in {path}")
 
     # --- Classifier ---
     classifier = data.get("classifier") or {}
-    classifier_model = str(classifier.get("model", "gemma4:31b"))
+    if not isinstance(classifier, dict):
+        raise ValueError("Classifier config must be a mapping")
+    classifier_model = classifier.get("model")
+    if not classifier_model:
+        raise ValueError(f"Classifier must define a 'model' in {path}")
+    classifier_model = str(classifier_model)
     classifier_provider = str(classifier.get("provider", "default"))
     if classifier_provider not in providers:
-        raise ValueError(
-            f"Classifier references unknown provider '{classifier_provider}' in {path}"
-        )
+        raise ValueError(f"Classifier references unknown provider '{classifier_provider}' in {path}")
     min_classify_len = int(classifier.get("min_classify_len", 10))
 
-    default_raw = data.get("default_tier")
-    try:
-        default_tier = Tier(str(default_raw)) if default_raw else DEFAULT_TIER
-    except ValueError:
-        raise ValueError(f"Unknown default_tier '{default_raw}' in {path}")
+    # --- Default Tier Derivation ---
+    # Smallest configured adaptive tier in axis order. If no adaptive tier is
+    # configured, there is no default fallback and the 'adaptive' model is
+    # unavailable (custom models still route by explicit id).
+    default_tier = None
+    for t in ADAPTIVE_TIERS:
+        if t in tiers:
+            default_tier = t
+            break
 
     return RouterModels(
         tiers=tiers,
+        custom_models=custom_models,
         default_tier=default_tier,
         classifier_model=classifier_model,
         classifier_provider=classifier_provider,
@@ -129,22 +163,14 @@ def load_models_yaml(path: Path | None) -> RouterModels | None:
         providers=providers,
     )
 
-
 @dataclass
 class Settings:
-    ollama_api_key: str
-    ollama_base_url: str = "https://ollama.com/v1"
     router_host: str = "127.0.0.1"
     router_port: int = 9000
-    default_tier: Tier = DEFAULT_TIER
-    # Minimum combined message length before we bother classifying at all.
-    # Below this, the request is treated as trivial (mini).
+    default_tier: str = "air"
     min_classify_len: int = 10
-    # Optional bearer token clients must send to reach the router.
     require_auth: str = ""
-    # Mounted model table + classifier config (from YAML or defaults).
     models: RouterModels = field(default_factory=RouterModels)
-    # Where router.log is written. Set by create_app; defaults to the repo root.
     project_root: Path = field(default_factory=lambda: Path.cwd())
 
     @classmethod
@@ -154,38 +180,33 @@ class Settings:
         default_models_yaml: Path | None = None,
     ) -> "Settings":
         _load_dotenv(dotenv_path)
-        key = os.environ.get("OLLAMA_API_KEY", "").strip()
         require_auth = os.environ.get("ROUTER_API_KEY", "").strip()
 
-        # Load models YAML: explicit ROUTER_MODELS_YAML wins, else the
-        # user config in ~/.config/polvo/config.yml, else the project
-        # default file, else built-in defaults.
         yaml_path_raw = os.environ.get("ROUTER_MODELS_YAML", "").strip()
         if yaml_path_raw:
             yaml_path: Path | None = Path(yaml_path_raw)
         else:
-            user_cfg = Path.home() / ".config" / "polvo" / "config.yml"
+            user_cfg = Path.home() / ".polvo" / "config.yml"
             if user_cfg.exists():
                 yaml_path = user_cfg
             else:
                 yaml_path = default_models_yaml
-        
-        models = load_models_yaml(yaml_path) or RouterModels()
+
+        try:
+            models = load_models_yaml(yaml_path) or RouterModels()
+        except ValueError as exc:
+            # In-progress config (e.g. mid-onboarding: providers but no models
+            # yet). Don't hard-crash — fall back to an empty table so the app
+            # can still assemble (CLI-level validation guards real startups).
+            import sys
+            print(f"polvo: config not ready ({exc}); starting with an empty model table.", file=sys.stderr)
+            models = RouterModels()
 
         return cls(
-            ollama_api_key=key,
-            ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "https://ollama.com/v1").rstrip("/"),
             router_host=os.environ.get("ROUTER_HOST", "127.0.0.1"),
-            router_port=int(os.environ.get("ROUTER_PORT", "9000")),
-            default_tier=Tier(os.environ.get("ROUTER_DEFAULT_TIER", DEFAULT_TIER.value)),
-            min_classify_len=int(os.environ.get("ROUTER_MIN_CLASSIFY_LEN", "10")),
+            router_port=int(os.environ.get("ROUTER_PORT", "9000") or "9000"),
+            default_tier=os.environ.get("ROUTER_DEFAULT_TIER", models.default_tier),
+            min_classify_len=int(os.environ.get("ROUTER_MIN_CLASSIFY_LEN", str(models.min_classify_len)) or "10"),
             require_auth=require_auth,
             models=models,
         )
-
-    @property
-    def effective_api_key(self) -> str:
-        """Raise early if the upstream key is missing."""
-        if not self.ollama_api_key:
-            raise RuntimeError("OLLAMA_API_KEY is not set")
-        return self.ollama_api_key

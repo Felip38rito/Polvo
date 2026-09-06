@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from .classify import classify
 from .config import Settings
-from .models import Tier
+from .models import RouterModels
 from . import responses as responses_translate
 
 log = logging.getLogger("model_router.proxy")
@@ -26,25 +26,32 @@ router = APIRouter()
 
 
 def _model_list_payload(models: "RouterModels") -> dict[str, Any]:
-    """Advertise the virtual + tier model ids the router understands."""
-    data = [
-        {
-            "id": "adaptive",
-            "object": "model",
-            "created": 0,
-            "owned_by": "polvo",
-        }
-    ]
-    for tier in Tier:
-        spec = models.tiers[tier]
+    """Advertise the virtual + model ids the router understands.
+
+    Always advertises the 'adaptive' virtual model (if any adaptive tier is
+    configured) plus every configured model (adaptive + custom), tagged by type.
+    """
+    data = []
+    if models.has_adaptive():
         data.append(
             {
-                "id": spec.name or tier.value,
+                "id": "adaptive",
                 "object": "model",
                 "created": 0,
                 "owned_by": "polvo",
-                "tier": tier.value,
+                "type": "adaptive",
+            }
+        )
+    for tier_key, spec in models.tiers.items():
+        data.append(
+            {
+                "id": spec.name or tier_key,
+                "object": "model",
+                "created": 0,
+                "owned_by": "polvo",
+                "tier": tier_key,
                 "model": spec.api_id,
+                "type": "adaptive" if models.is_adaptive(tier_key) else "custom",
             }
         )
     return {"object": "list", "data": data}
@@ -97,24 +104,39 @@ async def _process_chat(
     if last_user_content is not None:
         prompt = last_user_content
     else:
+        # No user message (e.g. a tool-call continuation: system + assistant +
+        # tool). Classify by the last NON-system message so the system prompt
+        # never leaks into the classifier. If only a system message exists,
+        # there is nothing meaningful to classify — fall back to the default.
         parts: list[str] = []
         for msg in messages:
+            if msg.get("role") == "system":
+                continue
             content = msg.get("content")
             if isinstance(content, str):
                 parts.append(content)
-        prompt = "\n".join(parts)
+        prompt = "\n".join(parts) if parts else ""
 
     requested_model = body.get("model", "")
     known_tier = settings.models.tier_for_alias(requested_model)
-    if known_tier is None:
-        try:
-            known_tier = Tier(requested_model)
-        except ValueError:
-            known_tier = None
-
     if known_tier is not None:
         routed_tier = known_tier
+    elif requested_model == "adaptive":
+        # Explicit 'adaptive' request. Requires at least one adaptive tier.
+        if not settings.models.has_adaptive():
+            raise HTTPException(
+                status_code=400,
+                detail="No adaptive tiers configured. Add mini/air/pro/ultra to the 'adaptive' block, or request a custom model by id.",
+            )
+        routed_tier = await classify(prompt, settings)
     else:
+        # Unknown model id — fall back to the classifier (if adaptive exists),
+        # else error clearly.
+        if not settings.models.has_adaptive():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown model '{requested_model}'. No adaptive tiers configured; request a custom model by id.",
+            )
         routed_tier = await classify(prompt, settings)
 
     routed_spec = settings.models.tiers[routed_tier]
@@ -124,7 +146,7 @@ async def _process_chat(
     snippet = prompt[:50].replace("\n", " ") + "..."
     log.info(
         "Tier=%s Model=%s Provider=%s Prompt=%s",
-        routed_tier.value,
+        routed_tier,
         routed_model,
         provider.base_url,
         snippet,
@@ -136,7 +158,7 @@ async def _process_chat(
 
     target_url = f"{provider.base_url}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {provider.resolve_api_key(fallback=settings.ollama_api_key)}",
+        "Authorization": f"Bearer {provider.resolve_api_key()}",
         "Content-Type": "application/json",
     }
 
@@ -183,7 +205,7 @@ async def _process_chat(
 
     headers_out = {
         "X-Router-Model": routed_model,
-        "X-Router-Tier": routed_tier.value,
+        "X-Router-Tier": routed_tier,
     }
 
     media = "text/event-stream" if stream else "application/json"
