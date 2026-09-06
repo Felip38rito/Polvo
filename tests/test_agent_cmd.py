@@ -1,6 +1,8 @@
 """Tests for the agent setup commands in Polvo CLI."""
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -127,3 +129,149 @@ def test_setup_copilot_idempotent_profile(monkeypatch):
             
             # open() should not be called for appending since line exists
             mock_open.assert_not_called()
+
+
+# --- claude code setup ---------------------------------------------------------
+
+def test_setup_claude_saves_env_vars(monkeypatch):
+    monkeypatch.setattr(core, "load_env_var",
+                        lambda var, default=None: "9000" if var == "ROUTER_PORT" else default)
+    saved = {}
+    monkeypatch.setattr(core, "save_env_key", lambda var, val, path=None: saved.update({var: val}))
+    monkeypatch.setattr("polvo_cli.agent_cmd._warn_claude_settings_conflicts", lambda: None)
+    monkeypatch.setattr("polvo_cli.agent_cmd._ensure_shell_source", lambda: True)
+
+    agent_cmd.setup_claude_code()
+
+    assert saved["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9000"
+    assert saved["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "mini"
+    assert saved["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "pro"
+    assert saved["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "ultra"
+    assert saved["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+    assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" not in saved
+
+
+def test_setup_claude_base_url_has_no_v1_suffix(monkeypatch):
+    """Regression: '/v1' in ANTHROPIC_BASE_URL yields /v1/v1/messages — the
+    client appends the path itself."""
+    monkeypatch.setattr(core, "load_env_var",
+                        lambda var, default=None: "9000" if var == "ROUTER_PORT" else default)
+    saved = {}
+    monkeypatch.setattr(core, "save_env_key", lambda var, val, path=None: saved.update({var: val}))
+    monkeypatch.setattr("polvo_cli.agent_cmd._warn_claude_settings_conflicts", lambda: None)
+    monkeypatch.setattr("polvo_cli.agent_cmd._ensure_shell_source", lambda: True)
+
+    agent_cmd.setup_claude_code()
+
+    assert not saved["ANTHROPIC_BASE_URL"].rstrip("/").endswith("/v1")
+
+
+def test_setup_claude_saves_auth_token(monkeypatch):
+    monkeypatch.setattr(core, "load_env_var",
+                        lambda var, default=None: "router" if var == "ROUTER_API_KEY" else "9000")
+    saved = {}
+    monkeypatch.setattr(core, "save_env_key", lambda var, val, path=None: saved.update({var: val}))
+    monkeypatch.setattr("polvo_cli.agent_cmd._warn_claude_settings_conflicts", lambda: None)
+    monkeypatch.setattr("polvo_cli.agent_cmd._ensure_shell_source", lambda: True)
+
+    agent_cmd.setup_claude_code()
+
+    assert saved["ANTHROPIC_AUTH_TOKEN"] == "router"
+    assert "ANTHROPIC_API_KEY" not in saved  # AUTH_TOKEN, not API_KEY
+
+
+def test_setup_claude_context_tokens_option(monkeypatch):
+    monkeypatch.setattr(core, "load_env_var", lambda var, default=None: default)
+    saved = {}
+    monkeypatch.setattr(core, "save_env_key", lambda var, val, path=None: saved.update({var: val}))
+    monkeypatch.setattr("polvo_cli.agent_cmd._warn_claude_settings_conflicts", lambda: None)
+    monkeypatch.setattr("polvo_cli.agent_cmd._ensure_shell_source", lambda: True)
+
+    agent_cmd.setup_claude_code(context_tokens=200000)
+
+    assert saved["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "200000"
+
+
+def test_setup_claude_ensures_shell_profile(monkeypatch):
+    monkeypatch.setattr(core, "load_env_var", lambda var, default=None: default)
+    monkeypatch.setattr(core, "save_env_key", lambda var, val, path=None: None)
+    monkeypatch.setattr("polvo_cli.agent_cmd._warn_claude_settings_conflicts", lambda: None)
+    called = {}
+    monkeypatch.setattr("polvo_cli.agent_cmd._ensure_shell_source", lambda: called.update(x=True) or True)
+
+    agent_cmd.setup_claude_code()
+    assert called.get("x")
+
+
+def test_warn_claude_settings_conflicts_detects_env_block(tmp_path, monkeypatch, capsys):
+    settings = tmp_path / ".claude"
+    settings.mkdir()
+    (settings / "settings.json").write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://old-proxy.example.com"}})
+    )
+    monkeypatch.setattr(agent_cmd.Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    agent_cmd._warn_claude_settings_conflicts()
+
+    out = capsys.readouterr().err
+    # Rich wraps lines and emits ANSI codes — normalize before matching.
+    plain = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", out).split())
+    assert "ANTHROPIC_BASE_URL" in plain
+    assert "override the shell environment" in plain
+
+
+def test_warn_claude_settings_conflicts_silent_when_clean(tmp_path, monkeypatch, capsys):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"env": {"OTHER_VAR": "x"}}))
+    monkeypatch.setattr(agent_cmd.Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    agent_cmd._warn_claude_settings_conflicts()
+
+    out = capsys.readouterr().err
+    plain = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", out).split())
+    assert "override the shell environment" not in plain
+
+
+def test_warn_claude_settings_conflicts_tolerates_broken_json(tmp_path, monkeypatch):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text("{not json")
+    monkeypatch.setattr(agent_cmd.Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    agent_cmd._warn_claude_settings_conflicts()  # must not raise
+
+
+def test_agent_claude_cli_end_to_end(tmp_path):
+    """Dry run of `polvo agent claude` in a subprocess with a temp HOME —
+    validates the real CLI wiring (Typer command, env file, shell profile)
+    without touching the user's actual ~/.polvo/.env or ~/.zshrc."""
+    import os
+    import subprocess
+    import sys
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".zshrc").write_text("# existing profile\n")
+
+    env = {
+        **{k: v for k, v in os.environ.items() if k != "ROUTER_PORT"},
+        "HOME": str(home),
+        "SHELL": "/bin/zsh",
+    }
+    polvo = Path(sys.executable).parent / "polvo"
+    result = subprocess.run(
+        [str(polvo), "agent", "claude"],
+        env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+
+    env_file = (home / ".polvo" / ".env").read_text()
+    assert "ANTHROPIC_BASE_URL=http://127.0.0.1:9000" in env_file
+    assert "ANTHROPIC_AUTH_TOKEN=router" in env_file
+    assert "ANTHROPIC_DEFAULT_SONNET_MODEL=pro" in env_file
+    assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" in env_file
+
+    zshrc = (home / ".zshrc").read_text()
+    assert "source ~/.polvo/.env" in zshrc
