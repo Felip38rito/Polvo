@@ -87,7 +87,7 @@ Configure these in `~/.polvo/.env` or your shell profile:
 | `ROUTER_MODELS_YAML` | `router.models.yaml` | Path to the model mapping file. |
 
 ### Model Mapping (YAML)
-Config is resolved from `ROUTER_MODELS_YAML` $\rightarrow$ `~/.config/polvo/config.yml` $\rightarrow$ `router.models.yaml` $\rightarrow$ Defaults.
+Config is resolved from `ROUTER_MODELS_YAML` $\rightarrow$ `~/.polvo/config.yml` $\rightarrow$ `router.models.yaml` $\rightarrow$ Defaults.
 
 ```yaml
 default_tier: air
