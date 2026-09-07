@@ -106,6 +106,7 @@ adaptive:
   mini:
     model: gemma4:31b
     description: "trivial/mechanical"
+    provider: default
   air:
     model: deepseek-v4-flash:0731
     description: "day-to-day"
