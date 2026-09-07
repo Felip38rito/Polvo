@@ -6,7 +6,7 @@ cheapest model that can handle the task. It keeps the expensive models
 trivial/day-to-day requests to the cheap ones.
 
 It is **provider-agnostic**: it works with any OpenAI-compatible API (Ollama
-Cloud, local Ollama, OpenAI, OpenRouter, Groq, Together, …). You just set the
+Cloud, local Ollama, OpenAI, OpenRouter, etc.). You just set the
 `base_url` + key of your provider and the tier → model mapping.
 
 ## Why Polvo?
@@ -70,7 +70,7 @@ answer quality, without wasting tokens on prompts that don't need it.
 Install Polvo with a single command (works on macOS and Linux):
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Felip38rito/Nexus/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Felip38rito/Polvo/main/install.sh | sh
 ```
 
 The installer bootstraps `uv`, clones the repo into `~/.polvo`, installs the `polvo` CLI globally, and sets up the background service.
@@ -144,6 +144,20 @@ polvo logs       # last 100 lines of logs
 polvo tail       # follow logs live
 ```
 
+## Agent Integration
+
+Polvo provides automated setup for popular AI agents. These commands configure the necessary environment variables in `~/.polvo/.env` and update your shell profile.
+
+```bash
+polvo agent hermes    # Setup for Hermes Agent
+polvo agent claude    # Setup for Claude Code
+polvo agent codex     # Setup for Codex CLI
+polvo agent copilot   # Setup for Copilot CLI
+polvo agent opencode  # Setup for OpenCode
+```
+
+> **Note:** For Claude Code, Polvo forces the `adaptive` model to ensure the classifier always decides the tier, overriding any client-side model persistence.
+
 ## Environment configuration
 
 | Var | Default | Description |
@@ -154,7 +168,7 @@ polvo tail       # follow logs live
 | `ROUTER_PORT` | `9000` | router port |
 | `ROUTER_DEFAULT_TIER` | `air` | last-resort fallback |
 | `ROUTER_MIN_CLASSIFY_LEN` | `10` | prompts shorter than this = trivial (`mini`) |
-| `ROUTER_API_KEY` | (empty) | if set, clients must send `Authorization: Bearer <key>` |
+| `ROUTER_API_KEY` | (empty) | if set, clients must send `Authorization: Bearer *** |
 | `ROUTER_MODELS_YAML` | `router.models.yaml` | path to a custom models YAML |
 
 > Additional providers (OpenAI, Anthropic, Gemini, …) are configured in the
@@ -181,9 +195,6 @@ providers:
   default:
     base_url: https://ollama.com/v1
     api_key_env: OLLAMA_API_KEY
-  # gemini:
-  #   base_url: https://generativelanguage.googleapis.com/v1beta
-  #   api_key_env: GEMINI_API_KEY
 
 tiers:
   mini:
@@ -195,9 +206,6 @@ tiers:
   pro:
     model: deepseek-v4-pro:0813
     description: "raw coding power"
-    # provider: gemini        # optional — defaults to "default"
-    # extra_params:           # optional — merged into the upstream request
-    #   reasoning_effort: high
   ultra:
     model: kimi-k3
     description: "deep synthesis, whole-architecture"
@@ -217,147 +225,6 @@ classifier:
 > lets you, for example, run `air` on Ollama Cloud and `pro` on Gemini/OpenAI/
 > Anthropic. Each provider's key is read from its `api_key_env` variable.
 
-## Supported providers
-
-The router is **provider-agnostic** and **multi-provider**: you can run every
-tier on one provider, or spread tiers across several. Each provider is a named
-entry in the YAML `providers:` block with a `base_url` and an `api_key_env`.
-
-To add a provider, define it in `router.models.yaml` and set its key in `.env`:
-
-```yaml
-providers:
-  <name>:
-    base_url: <openai-compatible /v1 endpoint>
-    api_key_env: <ENV_VAR_HOLDING_THE_KEY>
-```
-
-Then point any tier at it with `provider: <name>`.
-
-### Ollama Cloud (the default)
-
-```yaml
-providers:
-  default:
-    base_url: https://ollama.com/v1
-    api_key_env: OLLAMA_API_KEY
-tiers:
-  mini:    { model: gemma4:31b,             description: "trivial/discussion" }
-  air:     { model: deepseek-v4-flash:0731, description: "default day-to-day" }
-  pro:     { model: deepseek-v4-pro:0813,  description: "coding power/debug" }
-  ultra:   { model: kimi-k3,                description: "whole-architecture/synthesis" }
-classifier:
-  model: gemma4:31b
-```
-
-### Local Ollama
-
-```yaml
-providers:
-  local:
-    base_url: http://127.0.0.1:11434/v1
-    api_key_env: OLLAMA_API_KEY   # local doesn't auth; any value
-tiers:
-  mini:    { model: llama3.2:3b,          description: "trivial/discussion" }
-  air:     { model: qwen2.5:7b,           description: "default day-to-day" }
-  pro:     { model: qwen2.5:32b,          description: "reasoning/design" }
-  ultra:   { model: qwen2.5:72b,          description: "hard bug/refactor" }
-classifier:
-  model: llama3.2:3b
-```
-
-### OpenAI
-
-```yaml
-providers:
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
-tiers:
-  mini:    { model: gpt-4o-mini,          description: "trivial/discussion" }
-  air:     { model: gpt-4o-mini,          description: "default day-to-day" }
-  pro:     { model: gpt-4o,               description: "reasoning/design" }
-  ultra:   { model: gpt-4o,               description: "hard bug/refactor" }
-classifier:
-  model: gpt-4o-mini
-```
-
-### Anthropic
-
-```yaml
-providers:
-  anthropic:
-    base_url: https://api.anthropic.com/v1
-    api_key_env: ANTHROPIC_API_KEY
-tiers:
-  mini:    { model: claude-3-5-haiku-latest, description: "trivial/discussion" }
-  air:     { model: claude-3-5-haiku-latest, description: "default day-to-day" }
-  pro:     { model: claude-3-5-sonnet-latest, description: "reasoning/design" }
-  ultra:   { model: claude-3-7-sonnet-latest, description: "hard bug/refactor" }
-classifier:
-  model: claude-3-5-haiku-latest
-```
-
-> **Note:** Anthropic's native API is **not** OpenAI-compatible (it uses a
-> different request/response shape). To route Anthropic through Polvo, use an
-> OpenAI-compatible gateway in front of it (e.g. OpenRouter, or Anthropic's
-> own `/v1/messages` is not supported directly). The example above assumes an
-> OpenAI-compatible endpoint.
-
-### OpenRouter
-
-```yaml
-providers:
-  openrouter:
-    base_url: https://openrouter.ai/api/v1
-    api_key_env: OPENROUTER_API_KEY
-tiers:
-  mini:    { model: meta-llama/llama-3.1-8b-instruct, description: "trivial/discussion" }
-  air:     { model: anthropic/claude-3.5-haiku,       description: "default day-to-day" }
-  pro:     { model: anthropic/claude-3.5-sonnet,      description: "reasoning/design" }
-  ultra:   { model: anthropic/claude-3.7-sonnet,      description: "hard bug/refactor" }
-classifier:
-  model: meta-llama/llama-3.1-8b-instruct
-```
-
-### Groq
-
-```yaml
-providers:
-  groq:
-    base_url: https://api.groq.com/openai/v1
-    api_key_env: GROQ_API_KEY
-tiers:
-  mini:    { model: llama-3.1-8b-instant, description: "trivial/discussion" }
-  air:     { model: llama-3.3-70b-versatile, description: "default day-to-day" }
-  pro:     { model: llama-3.3-70b-versatile, description: "reasoning/design" }
-  ultra:   { model: llama-3.3-70b-versatile, description: "hard bug/refactor" }
-classifier:
-  model: llama-3.1-8b-instant
-```
-
-> The model ids above are examples — check your provider's real ids with
-> `curl <base_url>/v1/models` before using them.
-
-### Mixing providers across tiers
-
-You can spread tiers across providers. Example: `air` on Ollama Cloud, `pro`
-on OpenAI, `ultra` on Anthropic:
-
-```yaml
-providers:
-  default:  { base_url: https://ollama.com/v1, api_key_env: OLLAMA_API_KEY }
-  openai:   { base_url: https://api.openai.com/v1, api_key_env: OPENAI_API_KEY }
-  anthropic:{ base_url: <openai-compatible anthropic gateway>, api_key_env: ANTHROPIC_API_KEY }
-tiers:
-  mini:    { model: gemma4:31b,             description: "trivial/discussion" }
-  air:     { model: deepseek-v4-flash:0731, description: "default day-to-day" }
-  pro:     { model: gpt-4o, provider: openai, description: "reasoning/design" }
-  ultra:   { model: claude-3-7-sonnet-latest, provider: anthropic, description: "hard bug/refactor" }
-classifier:
-  model: gemma4:31b
-```
-
 ## Using it (clients)
 
 ### curl
@@ -367,8 +234,8 @@ classifier:
 curl http://127.0.0.1:9000/v1/models
 
 # Chat (streaming) — note the x-router-model / x-router-tier headers
-curl http://127.0.0.1:9000/v1/chat/completions \
-  -H "Content-Type: application/json" \
+curl http://127.0.0.1:9000/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
   -d '{"model":"adaptive","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
 
@@ -377,245 +244,9 @@ curl http://127.0.0.1:9000/v1/chat/completions \
 > tier, or one of the raw upstream api ids (e.g. `deepseek-v4-pro:0813`) — the
 > router honors it directly without re-classifying (transparent mode).
 
-### Hermes
+### Custom OpenAI Clients (Cursor, etc.)
 
-Add the router as a **named provider** so Hermes discovers the tiers from the
-router itself (the router is the source of truth — no model list hardcoded).
-
-#### 1. Register the provider in `config.yaml`
-
-```bash
-# Named provider entry. The `api` URL points at the router.
-hermes config set providers.router.api http://127.0.0.1:9000/v1
-hermes config set providers.router.name "Model Router"
-hermes config set providers.router.default_model adaptive
-```
-
-> Do **NOT** set `providers.router.models`. Leaving it out lets Hermes
-> *live-probe* `GET /v1/models` on the router and use exactly what the router
-> advertises (`adaptive, mini, air, pro, ultra`). If you hardcode a
-> comma-separated string, Hermes treats it as a single literal model id and the
-> picker shows one broken row. To pin a specific list instead, set
-> `providers.router.discover_models false` and provide a proper YAML list.
-
-#### 2. Make it the active provider
-
-```bash
-hermes config set model.provider router
-hermes config set model.default_model adaptive
-```
-
-#### 3. Pick a model (tiers show up)
-
-```bash
-hermes model
-```
-
-The picker now lists the router with **5 selectable models**:
-
-```
-⚙ Model Picker — Model Router
-Select a model (5 available) — type to filter
-> adaptive    # router decides the tier automatically
-  mini        # force gemma4:31b
-  air         # force deepseek-v4-flash:0731
-  pro         # force deepseek-v4-pro:0813
-  ultra       # force kimi-k3
-```
-
-`adaptive` routes every request through the classifier; the four tier entries
-force that tier directly (transparent mode).
-
-#### 4. Optional: short aliases
-
-To use `/model pro` / `/model air` / etc. instead of the full ids:
-
-```bash
-hermes config set model.aliases.mini router/mini
-hermes config set model.aliases.air router/air
-hermes config set model.aliases.pro router/pro
-hermes config set model.aliases.ultra router/ultra
-```
-
-> ⚠ Adding the router as your Hermes provider sends **all** Hermes traffic
-> through it. To undo, restore the previous provider:
-> `hermes config set model.provider ollama-cloud` (or whichever you used).
-
-### VS Code Copilot (UI)
-
-The VS Code Copilot extension supports custom providers natively via the
-command palette — no third-party extension needed:
-
-1. Open the Command Palette (`Cmd+Shift+P`) and run **Chat: Manage Language
-   Models**.
-2. Click **Add Model** -> **OpenAI Compatible**.
-3. Set the **Base URL** to `http://127.0.0.1:9000/v1` and enter your key
-   (any value works when the router has no auth).
-4. Pick `adaptive` (the router decides the tier per request) or a specific
-   tier (`mini`, `air`, `pro`, `ultra`) from the chat model picker.
-
-> The selected port must match the one your Polvo service is bound to
-> (`ROUTER_PORT` in `~/.polvo/.env`, default `9000`).
-
-### Copilot CLI
-
-The Copilot CLI speaks the **Responses API**, which the router implements
-natively at `/v1/responses` — no bridge needed. Point the Copilot provider at
-the router with environment variables (e.g. in `~/.zshrc`):
-
-```bash
-# GitHub Copilot CLI -> Polvo Model Router
-export COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:9000/v1
-export COPILOT_PROVIDER_API_KEY=router    # router without auth accepts any value
-export COPILOT_MODEL=adaptive             # <-- the router decides the tier per request
-```
-
-- **`COPILOT_MODEL=adaptive` is the recommended default.** It routes **every**
-  request through the classifier, so the router picks the cheapest adequate
-  tier (`mini`/`air`/`pro`/`ultra`) for each prompt. To pin a tier instead, set
-  it to `mini`, `air`, `pro`, or `ultra` — or to a raw upstream api id
-  (e.g. `deepseek-v4-pro:0813`) for transparent mode.
-- **`COPILOT_PROVIDER_WIRE_API=responses` is optional.** The router implements
-  `/v1/responses` natively, so Copilot works out of the box. You only need to
-  set `WIRE_API=responses` if you want to be explicit; Copilot also works over
-  `chat_completions` if you prefer.
-- The tiers resolve to Ollama Cloud, so the router's `.env` still needs the
-  upstream key (`OLLAMA_API_KEY`).
-- If you enable `ROUTER_API_KEY`, set `COPILOT_PROVIDER_API_KEY` to the real
-  bearer token.
-
-> ⚠ Pointing Copilot at the router sends **all** Copilot traffic through it
-> (including tool-call loops). That's the point — the classifier keeps the
-> cheap tiers on the day-to-day and escalates to `pro`/`ultra` only when a
-> prompt truly needs it. To go back to Copilot's cloud models, unset these
-> variables (`unset COPILOT_PROVIDER_BASE_URL COPILOT_PROVIDER_API_KEY
-> COPILOT_MODEL`).
-
-### Syncing the tiers into OpenCode
-
-Unlike Hermes, **OpenCode does not auto-discover models** for custom
-OpenAI-compatible providers (it requires a statically declared `models` block
-per provider — see [anomalyco/opencode#27553](https://github.com/anomalyco/opencode/issues/27553)).
-So the router can't be a *live* source of truth for OpenCode the way it is for
-Hermes. Instead, keep the router as the single place that defines the tiers and
-push a **snapshot** of its list into OpenCode with `sync-opencode.py`.
-
-The script:
-- Reads the tiers advertised by the router (`GET /v1/models`) — **the router
-  stays the source of truth**.
-- Rewrites **only** the `models` block of the `router` provider in your
-  `opencode.json(c)`. Everything else (other providers, top-level keys, the
-  `router` provider's `npm`/`name`/`options`) is preserved byte-for-byte.
-- Backs up the config before writing (timestamped `.bak-<timestamp>` next to
-  it), so it is **non-destructive** — your user config is never deleted.
-
-```bash
-# List the tiers the router currently advertises (requires the router running)
-python3 sync-opencode.py --dry-run
-
-# Write them into ~/.config/opencode/opencode.jsonc (default config)
-python3 sync-opencode.py
-
-# Target a different config and/or router
-python3 sync-opencode.py --config /path/to/opencode.json --router-url http://127.0.0.1:9000/v1
-```
-
-Options:
-
-| Flag | Default | Description |
-|---|---|---|
-| `--config` | `~/.config/opencode/opencode.jsonc` | OpenCode config to update |
-| `--router-url` | `http://127.0.0.1:9000/v1` | Polvo router base URL |
-| `--dry-run` | off | Show what would change without writing |
-
-> **How to configure the tiers (mini/air/pro/ultra):** the tier *names* come
-> straight from the router's `/v1/models` (edit `router.models.yaml` — see
-> [Model configuration](#model-configuration-yaml) — then restart with
-> `polvoctl restart`). Re-run the sync and the OpenCode provider updates to
-> match. If the router advertises a new tier, it appears; if one is removed,
-> it disappears from the OpenCode provider too.
-
-> **How to run it correctly:** the router must be up (`polvoctl status`)
-> before syncing. If it's down, the script fails fast with a clear message and
-> leaves your config untouched. To keep OpenCode always in step, run the sync
-> after every router restart (or whenever you change `router.models.yaml`).
-
-> **Non-destructive guarantee:** the script only ever replaces the `models`
-> value inside the `router` provider. It never deletes other providers or other
-> keys in your config, and it always leaves a backup before the first write.
-
-### OpenCode
-
-Add a `router` provider in `~/.config/opencode/opencode.jsonc`:
-
-```jsonc
-{
-  "model": "router/adaptive",
-  "provider": {
-    "router": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Model Router (local)",
-      "options": {
-        "baseURL": "http://127.0.0.1:9000/v1",
-        "apiKey": "router"
-      },
-      "models": {
-        "adaptive": { "name": "Adaptive (auto-tier)", "limit": { "context": 1048576, "output": 65536 } },
-        "mini": { "name": "Gemma 4 31B (mini)", "limit": { "context": 1048576, "output": 65536 } },
-        "air": { "name": "DeepSeek V4 Flash (air)", "limit": { "context": 1048576, "output": 65536 } },
-        "pro": { "name": "DeepSeek V4 Pro (pro)", "limit": { "context": 1048576, "output": 65536 } },
-        "ultra": { "name": "Kimi K3 (ultra)", "limit": { "context": 1048576, "output": 65536 } }
-      }
-    }
-  }
-}
-```
-
-> The router doesn't require auth by default, so `apiKey` can be any non-empty
-> value. If you enable `ROUTER_API_KEY`, replace it with the real value.
->
-> **Tip:** don't hand-edit this block — run `sync-opencode.py` (see
-> [Syncing the tiers into OpenCode](#syncing-the-tiers-into-opencode)) so the
-> model list always matches what the router advertises.
-
-## Running as a service
-
-To have the router start at login and restart itself on crash, use a background
-service. The `polvoctl` script manages the whole lifecycle and **self-locates**
-— it derives the repo path from its own location, so it works whether you
-installed via the script (repo in `~/.polvo`) or cloned it manually.
-
-After a script install, the service is already set up. You can manage it with
-either the `polvo` CLI or `polvoctl` directly:
-
-```bash
-polvo install       # generate the service config + load it (start at login)
-polvo status        # is it running?
-polvo restart       # after changing code/config
-polvo tail          # follow logs live
-polvo uninstall     # stop + remove the service config
-```
-
-Commands: `install | uninstall | start | stop | restart | status | logs | tail`.
-
-`polvoctl` auto-detects the OS and uses the native service manager:
-
-- **macOS → launchd**: writes a plist to `~/Library/LaunchAgents/<label>.plist`
-  (`RunAtLoad` + `KeepAlive` + `ThrottleInterval=10`; logs in `logs/`).
-- **Linux → systemd (user unit)**: writes a unit to
-  `~/.config/systemd/user/<label>.service` (`Restart=always`; logs via
-  `journalctl --user`).
-
-The service label defaults to `polvo`; override with `POLVO_LABEL`
-(e.g. `POLVO_LABEL=com.example.polvo polvoctl install`).
-
-`routerctl.sh` is kept as a deprecated alias for `polvoctl` so existing
-scripts/aliases keep working.
-
-> **Pitfall (macOS):** launchd doesn't source your `~/.zshrc`, so its minimal
-> PATH can't find `uv` (which usually lives in `~/.local/bin`). `polvoctl
-> install` auto-detects the `uv` directory and bakes it into the plist's
-> `EnvironmentVariables.PATH`. If you move `uv`, re-run `polvoctl install`.
+Point the **Base URL** to `http://127.0.0.1:9000/v1` and use `adaptive` as the model.
 
 ## Security
 
