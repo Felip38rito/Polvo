@@ -339,7 +339,7 @@ def sync_config(text: str, models: list[dict], dry_run: bool = False) -> tuple[s
         # Insert it after the opening brace.
         brace_pos = obj_text.find('{')
         # Sniff indent from the next line if possible
-        next_nl = obj_text.find('\\n', brace_pos)
+        next_nl = obj_text.find('\n', brace_pos)
         indent = "  "
         if next_nl != -1:
             line_after = obj_text[next_nl+1:]
@@ -347,7 +347,7 @@ def sync_config(text: str, models: list[dict], dry_run: bool = False) -> tuple[s
             if match:
                 indent = match.group(1)
         
-        insertion = f'\\n{indent}"model": "adaptive",'
+        insertion = f'\n{indent}"model": "adaptive",'
         obj_text = obj_text[:brace_pos+1] + insertion + obj_text[brace_pos+1:]
 
     # 2. Locate and rewrite the "models" block
