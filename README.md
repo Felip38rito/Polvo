@@ -39,7 +39,7 @@ In modern AI workflows, you typically face a lose-lose trade-off:
 Install Polvo with a single command (macOS and Linux):
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Felip38rito/Polvo/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Felip38rito/Polvo/stable/install.sh | sh
 ```
 
 The installer bootstraps `uv`, clones the repo into `~/.polvo`, installs the `polvo` CLI globally, and sets up the background service via `launchd` (macOS) or `systemd` (Linux).
@@ -87,47 +87,48 @@ Configure these in `~/.polvo/.env` or your shell profile:
 | `ROUTER_MODELS_YAML` | `router.models.yaml` | Path to the model mapping file. |
 
 ### Model Mapping (YAML)
-Config is resolved from `ROUTER_MODELS_YAML` $\rightarrow$ `~/.config/polvo/config.yml` $\rightarrow$ `router.models.yaml` $\rightarrow$ Defaults.
+Config is resolved from `ROUTER_MODELS_YAML` $\rightarrow$ `~/.polvo/config.yml` $\rightarrow$ `router.models.yaml` $\rightarrow$ Defaults.
 
 ```yaml
 default_tier: air
 
 # Upstream endpoints
 providers:
-  default:
+  ollama-cloud:
     base_url: https://ollama.com/v1
-    api_key_env: OLLAMA_API_KEY
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
+    api_key_env: OLLAMA_CLOUD_API_KEY
+  open-router:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPEN_ROUTER_API_KEY
 
 # The Adaptive Scale (Fixed keys: mini, air, pro, ultra)
 adaptive:
   mini:
-    model: gemma4:31b
+    model: gemma4:cloud
     description: "trivial/mechanical"
+    provider: ollama-cloud
   air:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4-flash:cloud
     description: "day-to-day"
-    provider: default
+    provider: ollama-cloud
   pro:
-    model: gpt-4o
+    model: minimax-m3:cloud
     description: "complex reasoning"
-    provider: openai
+    provider: ollama-cloud
   ultra:
-    model: claude-3-7-sonnet-latest
+    model: glm-5.3
     description: "deep synthesis"
-    provider: openai
+    provider: ollama-cloud
 
 # Custom models (not used by classifier, routable by explicit ID)
 custom:
   experimental-model:
     model: some-api-id
-    provider: default
+    provider: ollama-cloud
 
 classifier:
-  model: gemma4:31b
-  provider: default
+  model: gemma4:cloud
+  provider: ollama-cloud
   min_classify_len: 10
 ```
 
