@@ -46,7 +46,6 @@ def _ensure_header(data: str, port: str) -> str:
             continue
         out.append(line)
 
-    # Fall back to inserting defaults before the first [ table header.
     if not (seen_model and seen_provider):
         extra = []
         if not seen_model:
@@ -55,9 +54,7 @@ def _ensure_header(data: str, port: str) -> str:
             extra.append(header_line("model_provider", PROVIDER_NAME))
         if not seen_catalog:
             extra.append(header_line("model_catalog_json", str(Path.home() / ".codex" / "model.json")))
-
-        # Insert extra lines right after the first line that starts a top-level key,
-        # before any [table] header. Simpler: prepend the missing ones.
+        
         result = "\n".join(out)
         for e in reversed(extra):
             result = e + "\n" + result
@@ -66,15 +63,9 @@ def _ensure_header(data: str, port: str) -> str:
     return "\n".join(out)
 
 
-def _replace_provider_block(data: str, provider_name: str) -> str:
-    """Remove any existing [model_providers.<name>] block so we can rewrite it.
-
-    A TOML table block runs from the [model_providers.X] header up to the
-    next line that is a table/array header (starts with '[') or end of file.
-    """
-    header_re = re.compile(
-        r"^\s*\[model_providers\.[A-Za-z0-9_\-\.]+\]\s*$", re.MULTILINE
-    )
+def _replace_provider_blocks(data: str, provider_names: list[str]) -> str:
+    """Remove any existing [model_providers.X] blocks for the given names."""
+    header_re = re.compile(r"^\s*\[model_providers\.[A-Za-z0-9_\-\.]+\].*$", re.MULTILINE)
 
     out_lines: list[str] = []
     lines = data.splitlines()
@@ -82,28 +73,26 @@ def _replace_provider_block(data: str, provider_name: str) -> str:
     while i < len(lines):
         line = lines[i]
         if header_re.match(line):
-            # Extract the provider name inside the brackets.
-            name_match = re.search(r"\[model_providers\.([A-Za-z0-9_\-.]+)\]", line)
+            name_match = re.search(r"\[model_providers\.([A-Za-z0-9_\-.]+)]", line)
             name = name_match.group(1) if name_match else ""
-            # Skip this header and its body until the next [ header.
+            
+            # Find end of block
+            block_start = i
             while i < len(lines):
                 current = lines[i]
-                if current.strip().startswith("[") and current.strip() != line.strip():
+                # A block ends when a new [table] starts, but NOT if it's the current line
+                if i > block_start and current.strip().startswith("["):
                     break
                 i += 1
-            if name == provider_name:
-                # We will re-insert the block in _append_provider_block.
-                continue
-            # Non-target provider: keep its block intact.
+            
+            if name not in provider_names:
+                # Keep the block
+                out_lines.extend(lines[block_start:i])
+        else:
             out_lines.append(line)
-            i -= 1 if i > 0 else 0
-            continue
-        out_lines.append(line)
-        i += 1
-
-    result = "\n".join(out_lines)
-    # Normalize trailing blank lines.
-    return result.rstrip() + "\n"
+            i += 1
+    
+    return "\n".join(out_lines).rstrip() + "\n"
 
 
 def _append_provider_block(data: str, port: str) -> str:
@@ -130,10 +119,11 @@ def write_codex_config(port: str) -> str:
 
     current = path.read_text()
 
-    # Reorder: remove any pre-existing polvo block (so we don't append twice),
-    # then rewrite the header, then append the fresh block.
-    current = _replace_provider_block(current, PROVIDER_NAME)
+    # 1. Remove blocks for polvo, router, nexus, etc.
+    current = _replace_provider_blocks(current, ["polvo", "router", "nexus"])
+    # 2. Rewrite the header
     current = _ensure_header(current, port)
+    # 3. Append the fresh Polvo block
     updated = _append_provider_block(current, port)
 
     path.write_text(updated)

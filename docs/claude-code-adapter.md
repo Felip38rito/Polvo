@@ -27,6 +27,7 @@ O comando grava em `~/.polvo/.env` (e garante que seu shell profile faz
 |---|---|---|
 | `ANTHROPIC_BASE_URL` | `http://127.0.0.1:<port>` | **Sem** `/v1` — o cliente acrescenta `/v1/messages` sozinho |
 | `ANTHROPIC_AUTH_TOKEN` | valor de `ROUTER_API_KEY` | Bearer; evita o prompt interativo do `ANTHROPIC_API_KEY` |
+| `ANTHROPIC_MODEL` | `adaptive` | Força o roteamento adaptativo (classificador) para cada requisição |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `mini` | Trabalho de fundo/subagentes |
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `pro` | Modelo primário |
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | `ultra` | Tarefas pesadas |

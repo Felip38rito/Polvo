@@ -125,9 +125,13 @@ def setup_opencode() -> None:
 def setup_codex() -> None:
     """Automated setup for Codex CLI to use Polvo."""
     port = core.load_env_var("ROUTER_PORT", "9000")
+    api_key = core.load_env_var("ROUTER_API_KEY", "router")
     console.print(
         Panel(f"[bold cyan]Codex CLI Setup[/bold cyan]\nConfiguring Codex to route through Polvo on port {port}.\n")
     )
+
+    # Write POLVO_API_KEY so Codex (env_key = "POLVO_API_KEY") can authenticate.
+    core.save_env_key("POLVO_API_KEY", api_key)
 
     try:
         codex_config.write_codex_config(port)
@@ -138,6 +142,9 @@ def setup_codex() -> None:
     except Exception as e:
         err_console.print(f"[red]Unexpected error configuring Codex: {e}[/red]")
         raise typer.Exit(code=1)
+
+    # Ensure the user's shell sources ~/.polvo/.env so POLVO_API_KEY is in scope.
+    _ensure_shell_source()
 
 
 def setup_copilot() -> None:
@@ -155,6 +162,7 @@ def setup_copilot() -> None:
         "COPILOT_PROVIDER_BASE_URL": api_url,
         "COPILOT_PROVIDER_API_KEY": api_key,
         "COPILOT_MODEL": "adaptive",
+        "ROUTER_API_KEY": api_key,
     }
     
     for var, val in copilot_vars.items():
@@ -210,6 +218,7 @@ def setup_claude_code(context_tokens: int | None = None) -> None:
     claude_vars = {
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_MODEL": "adaptive",
         # Adaptive Scale tiers as Anthropic model aliases: haiku-class work
         # (incl. background/subagent tasks) -> mini, sonnet -> pro, opus -> ultra.
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mini",
