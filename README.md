@@ -1,3 +1,7 @@
+<img width="1254" height="1254" alt="polvo" src="https://github.com/user-attachments/assets/853b0bca-a42d-4b1f-b6a9-efb7a8891da6" />
+
+
+
 # Polvo
 
 Polvo is a local **OpenAI-compatible proxy** that intelligently routes chat requests to the cheapest model capable of handling the task. By segregating trivial requests from complex reasoning, Polvo allows you to maintain high-tier performance while drastically reducing token costs.
