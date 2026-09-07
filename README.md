@@ -1,152 +1,65 @@
 # Polvo
 
-A local **OpenAI-compatible** proxy that routes each chat request to the
-cheapest model that can handle the task. It keeps the expensive models
-(`pro`/`ultra`) reserved for prompts that truly need them, and sends
-trivial/day-to-day requests to the cheap ones.
+Polvo is a local **OpenAI-compatible proxy** that intelligently routes chat requests to the cheapest model capable of handling the task. By segregating trivial requests from complex reasoning, Polvo allows you to maintain high-tier performance while drastically reducing token costs.
 
-It is **provider-agnostic**: it works with any OpenAI-compatible API (Ollama
-Cloud, local Ollama, OpenAI, OpenRouter, etc.). You just set the
-`base_url` + key of your provider and the tier → model mapping.
+It is **provider-agnostic**: it works with any OpenAI-compatible API (Ollama Cloud, local Ollama, OpenAI, OpenRouter, etc.). You define your providers and map them to an adaptive scale of tiers.
 
-## Why Polvo?
+## 🎯 The Problem
 
-The problem Polvo solves is simple and expensive: **paying for a Pro model to
-answer "hello"**.
+In modern AI workflows, you typically face a lose-lose trade-off:
+- **Pin to a cheap model** $\rightarrow$ Complex prompts (architecture refactor, race condition debugging) get weak answers, wasting your time.
+- **Pin to an expensive model** $\rightarrow$ Every request, even "hello", pays the top-tier price. In agents (Hermes, Claude Code, Cursor) that make dozens of tool calls per task, this burns credits rapidly.
 
-Without a router, you have two bad choices:
+**Polvo breaks this trade-off.** It classifies the intent of every request in real-time and routes it to the cheapest adequate tier.
 
-- **Pin to the cheap model** → complex prompts (architecture refactor, race
-  condition debugging) get weak answers and you waste time.
-- **Pin to the expensive model** → every request, even trivial ones, pays the
-  top-tier price. In an agent (Hermes, OpenCode, Cursor) that makes dozens of
-  tool calls per task, that burns credits for nothing.
+## 🛠 How it Works
 
-Polvo breaks that trade-off: it **classifies the intent** of each request and
-routes to the cheapest tier that can handle it. Trivial goes to `mini`,
-day-to-day to `air`, and heavy reasoning only then climbs to `pro`/`ultra`.
+1. **Request Arrival**: A client points its `base_url` at Polvo.
+2. **Hybrid Classification**: Polvo determines the required tier:
+   - **Deterministic Path**: Instant routing for obvious cases (explicit model overrides or trivial chatter).
+   - **LLM Path**: A lightweight model analyzes the prompt's qualitative requirements (intent, scope, context) and returns a strict JSON decision.
+   - **Fail-safe**: If classification fails, it defaults to the `air` tier, ensuring the request never breaks.
+3. **Adaptive Routing**: The request is forwarded to the upstream provider associated with that tier.
+4. **Transparency**: Response headers (`X-Router-Model` and `X-Router-Tier`) reveal exactly which model handled the request.
 
-The result is **expensive-model performance at cheap-model cost** — the same
-answer quality, without wasting tokens on prompts that don't need it.
+> **Context Isolation**: Only the last user message is fed to the classifier. System prompts and tool history are ignored to prevent technical context from artificially inflating the required tier.
 
-## How it works
+## 📉 The Adaptive Scale
 
-1. A client (Hermes, OpenCode, curl, any OpenAI SDK) points its `base_url` at the router.
-2. The router reads the prompt and classifies the difficulty (**hybrid** classifier):
-   - **Deterministic** only for the obvious: explicit model override ("use
-     deepseek-v4-pro") and trivial chatter (greetings/short). Instant, free.
-   - **LLM-primary** for everything else: a cheap model returns strict JSON
-     with the qualitative tier decision. Tiering is fundamentally qualitative
-     (intent, scope, context) — keyword matching can't capture that.
-   - **Fail-safe**: LLM error → default `air`. Never breaks the request.
-3. The router forwards to the chosen model and streams the response.
-   - Headers: `X-Router-Model` (model id) and `X-Router-Tier` (mini/air/pro/ultra).
-
-> **Only the last user message** feeds the classifier. The system prompt and
-> tool-call history are ignored in the tier decision — otherwise accumulated
-> technical context would saturate everything to `pro`/`ultra`.
-
-## Tiers
-
-| Tier | Use |
+| Tier | Target Use Case |
 |---|---|
-| `mini` | trivial/mechanical + discussion |
-| `air` (default) | day-to-day |
-| `pro` | complex reasoning / coding power / hard debug / refactor / concurrency / public API |
-| `ultra` | hardest problems, whole-architecture, deep synthesis, adversarial |
+| `mini` | Trivial/mechanical tasks, greetings, and simple discussion. |
+| `air` | Default day-to-day interaction and routine coding. |
+| `pro` | Complex reasoning, deep debugging, design, and concurrency. |
+| `ultra` | Whole-system synthesis, "impossible" problems, and adversarial tasks. |
 
-## Requirements
+## 🚀 Quick Start
 
-- **macOS or Linux** (the installer auto-detects the OS and uses the native
-  service manager: `launchd` on macOS, `systemd` on Linux).
-- `curl` and `git` (both preinstalled on macOS and most Linux distros).
-- An upstream provider API key (e.g. `OLLAMA_API_KEY`).
-
-> `uv` is **not** required up front — the installer bootstraps it for you if
-> it's missing.
-
-## Quick start
-
-Install Polvo with a single command (works on macOS and Linux):
+### 1. Installation
+Install Polvo with a single command (macOS and Linux):
 
 ```bash
 curl -LsSf https://raw.githubusercontent.com/Felip38rito/Polvo/main/install.sh | sh
 ```
 
-The installer bootstraps `uv`, clones the repo into `~/.polvo`, installs the `polvo` CLI globally, and sets up the background service.
+The installer bootstraps `uv`, clones the repo into `~/.polvo`, installs the `polvo` CLI globally, and sets up the background service via `launchd` (macOS) or `systemd` (Linux).
 
-Then, simply run:
-
-```bash
-polvo           # Guided onboarding: Provider -> Tiers -> Classifier
-polvo status    # Check if the router is running
-curl localhost:9000/v1/models
-```
-
-> **Development / from source:** if you already have the repo cloned, you can
-> run it directly with `uv sync --extra dev` and
-> `PYTHONPATH=src uv run uvicorn model_router.main:app --host 127.0.0.1 --port 9000`,
-> or install the CLI in place with `uv tool install .`.
-
-Tests:
-
-```bash
-uv run pytest
-```
-
-## Using the Polvo CLI
-
-`polvo` is a modern CLI for managing the router: guided setup, service
-lifecycle, and config management. It wraps `polvoctl.sh` for service commands.
-
-After installing via the script, `polvo` is a real binary on your `PATH`
-(installed to `~/.local/bin` by `uv tool install`), so it works from any
-directory:
-
-```bash
-polvo version     # confirm it's installed
-```
-
-### Guided onboarding
-
-If you run `polvo` without arguments, it detects what is missing from your 
-config and guides you through a linear setup:
+### 2. Guided Onboarding
+Run the interactive setup to configure your providers and the adaptive scale:
 
 ```bash
 polvo
 ```
 
-The flow is: **Providers** $\rightarrow$ **The Adaptive Scale** $\rightarrow$ **Classifier**.
-
-### Management commands
-
-Once configured, you can manage specific areas:
-
+### 3. Verification
 ```bash
-polvo provider    # Interactive wizard to add/remove providers
-polvo tier        # Interactive wizard for the adaptive scale (mini to ultra)
-polvo custom      # Interactive wizard for explicit custom models
+polvo status    # Check if the router is running
+curl localhost:9000/v1/models  # List advertised tiers
 ```
 
-Non-interactive subcommands are available for scripts:
-- `polvo provider add <name> --url <url> --env <VAR>`
-- `polvo tier set <key> --model <id> --provider <name>`
-- `polvo custom set <key> --model <id> --provider <name>`
+## 🤖 Agent Integration
 
-### Service lifecycle
-
-```bash
-polvo start      # start the router service
-polvo stop       # stop it
-polvo restart     # restart it
-polvo status     # is it running?
-polvo logs       # last 100 lines of logs
-polvo tail       # follow logs live
-```
-
-## Agent Integration
-
-Polvo provides automated setup for popular AI agents. These commands configure the necessary environment variables in `~/.polvo/.env` and update your shell profile.
+Polvo provides automated setup for popular AI agents. These commands configure the necessary environment variables in `~/.polvo/.env` and update your shell profile automatically.
 
 ```bash
 polvo agent hermes    # Setup for Hermes Agent
@@ -156,109 +69,105 @@ polvo agent copilot   # Setup for Copilot CLI
 polvo agent opencode  # Setup for OpenCode
 ```
 
-> **Note:** For Claude Code, Polvo forces the `adaptive` model to ensure the classifier always decides the tier, overriding any client-side model persistence.
+### Special Integrations
+- **Claude Code**: Polvo forces the `adaptive` model for all `/v1/messages` requests. This overrides client-side model persistence, ensuring the classifier always decides the tier per request.
+- **OpenCode**: The `agent opencode` command automates the `sync-opencode.py` process, pushing a snapshot of the router's tiers into the OpenCode configuration.
 
-## Environment configuration
+## ⚙️ Configuration
+
+### Environment Variables
+Configure these in `~/.polvo/.env` or your shell profile:
 
 | Var | Default | Description |
 |---|---|---|
-| `OLLAMA_API_KEY` | — | key for the `default` provider (Ollama Cloud) |
-| `OLLAMA_BASE_URL` | `https://ollama.com/v1` | base URL for the `default` provider |
-| `ROUTER_HOST` | `127.0.0.1` | router bind address |
-| `ROUTER_PORT` | `9000` | router port |
-| `ROUTER_DEFAULT_TIER` | `air` | last-resort fallback |
-| `ROUTER_MIN_CLASSIFY_LEN` | `10` | prompts shorter than this = trivial (`mini`) |
-| `ROUTER_API_KEY` | (empty) | if set, clients must send `Authorization: Bearer *** |
-| `ROUTER_MODELS_YAML` | `router.models.yaml` | path to a custom models YAML |
+| `ROUTER_PORT` | `9000` | Port the router binds to. |
+| `ROUTER_HOST` | `127.0.0.1` | Bind address. |
+| `ROUTER_API_KEY` | (empty) | Optional Bearer token for client authentication. |
+| `ROUTER_DEFAULT_TIER` | `air` | Fallback tier if classification fails. |
+| `ROUTER_MODELS_YAML` | `router.models.yaml` | Path to the model mapping file. |
 
-> Additional providers (OpenAI, Anthropic, Gemini, …) are configured in the
-> YAML `providers:` block and use their **own** env vars (e.g. `OPENAI_API_KEY`,
-> `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`). `OLLAMA_API_KEY`/`OLLAMA_BASE_URL`
-> only back the `default` provider.
-
-## Model configuration (YAML)
-
-Each tier accepts two optional fields:
-- `name`: a display/route alias shown in `/v1/models` (e.g. `Fast`). If unset, the tier key is used. The classifier always uses the internal key.
-- `description`: overrides the classifier's system prompt for that tier. If unset, the built-in description is used.
-- `extra_params`: a mapping of provider-specific parameters (e.g. `reasoning_effort`, `budget_tokens`) merged into the upstream request body for that tier.
-
-Config is resolved from (first match): `ROUTER_MODELS_YAML` env var, `~/.config/polvo/config.yml`, `router.models.yaml` in the repo, then built-in defaults.
+### Model Mapping (YAML)
+Config is resolved from `ROUTER_MODELS_YAML` $\rightarrow$ `~/.config/polvo/config.yml` $\rightarrow$ `router.models.yaml` $\rightarrow$ Defaults.
 
 ```yaml
 default_tier: air
 
-# Named upstream endpoints. Each tier (and the classifier) can point at one.
-# If you omit this block, a single "default" provider (Ollama Cloud) is used
-# and every tier points at it.
+# Upstream endpoints
 providers:
   default:
     base_url: https://ollama.com/v1
     api_key_env: OLLAMA_API_KEY
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
 
-tiers:
+# The Adaptive Scale (Fixed keys: mini, air, pro, ultra)
+adaptive:
   mini:
-    model: gemma4:31b          # provider's real API id
-    description: "fast/cheap - discussion + trivial/mechanical"
+    model: gemma4:31b
+    description: "trivial/mechanical"
   air:
     model: deepseek-v4-flash:0731
-    description: "default - day-to-day"
+    description: "day-to-day"
+    provider: default
   pro:
-    model: deepseek-v4-pro:0813
-    description: "raw coding power"
+    model: gpt-4o
+    description: "complex reasoning"
+    provider: openai
   ultra:
-    model: kimi-k3
-    description: "deep synthesis, whole-architecture"
+    model: claude-3-7-sonnet-latest
+    description: "deep synthesis"
+    provider: openai
+
+# Custom models (not used by classifier, routable by explicit ID)
+custom:
+  experimental-model:
+    model: some-api-id
+    provider: default
 
 classifier:
-  model: gemma4:31b            # primary LLM decider (JSON decision)
-  provider: default            # which provider serves the classifier
+  model: gemma4:31b
+  provider: default
   min_classify_len: 10
 ```
 
-> **IMPORTANT:** use the provider's **raw API ids** (e.g. `deepseek-v4-flash:0731`),
-> not tool aliases (e.g. `deepseek-v4-flash:cloud` is a Hermes alias and returns
-> 404 on the API). Check the real ids with `curl <base_url>/v1/models`.
+## 🛠 CLI Reference
 
-> **Multi-provider:** each tier can point at a different provider via
-> `provider: <name>`. The classifier can also run on its own provider. This
-> lets you, for example, run `air` on Ollama Cloud and `pro` on Gemini/OpenAI/
-> Anthropic. Each provider's key is read from its `api_key_env` variable.
-
-## Using it (clients)
-
-### curl
-
+### Management
 ```bash
-# List models
-curl http://127.0.0.1:9000/v1/models
-
-# Chat (streaming) — note the x-router-model / x-router-tier headers
-curl http://127.0.0.1:9000/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -d '{"model":"adaptive","messages":[{"role":"user","content":"hello"}],"stream":true}'
+polvo provider    # Manage upstream providers
+polvo tier        # Configure the adaptive scale
+polvo custom      # Manage custom model mappings
+polvo version     # Check installed version
 ```
 
-> `model: "adaptive"` is a virtual id that **always** forces classification.
-> You can also send a tier name (`mini`, `air`, `pro`, `ultra`) to force that
-> tier, or one of the raw upstream api ids (e.g. `deepseek-v4-pro:0813`) — the
-> router honors it directly without re-classifying (transparent mode).
+### Service Lifecycle
+```bash
+polvo start      # Start background service
+polvo stop       # Stop background service
+polvo restart     # Restart service (apply config changes)
+polvo status     # Check service health
+polvo logs       # View recent logs
+polvo tail       # Follow logs live
+```
 
-### Custom OpenAI Clients (Cursor, etc.)
+## 🌐 API & Discovery
 
-Point the **Base URL** to `http://127.0.0.1:9000/v1` and use `adaptive` as the model.
+Polvo is OpenAI-compatible. To use it with any client, set the **Base URL** to `http://127.0.0.1:9000/v1`.
 
-## Security
+### Discovery Endpoints
+For advanced clients, Polvo supports the following discovery endpoints:
+- `GET /v1/models`: List all advertised tiers and models.
+- `GET /version`: Returns router version and name.
+- `GET /api/tags`, `/props`, `/v1/props`: Support endpoints for gateway discovery.
 
-- Provider keys are read from env (or `.env`), **never** committed.
-- `.gitignore` covers `.env`, `.venv/`, `logs/`, `router.log`.
-- `yaml.safe_load` (no YAML RCE).
-- Default bind on `127.0.0.1` (not exposed to the network).
-- Optional auth via `ROUTER_API_KEY` (Bearer).
-- Each provider's key lives in its own env var (e.g. `OLLAMA_API_KEY`,
-  `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) — set them in `.env`, which is git-ignored.
+## 🛡 Security
+- **No Secrets in Git**: Provider keys are read from environment variables.
+- **Local by Default**: Binds to `127.0.0.1` to prevent external access.
+- **Secure Loading**: Uses `yaml.safe_load` to prevent RCE.
 
-## Tests / verification
-
-- 49 unit tests (`classify`, `config`, `proxy`, `sync-opencode`) with MockTransport.
-- Real smoke test against Ollama Cloud validated 2026-08-25.
+## 🧪 Verification
+Run the test suite to verify the router logic and translation shims:
+```bash
+uv run pytest
+```
