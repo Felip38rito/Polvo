@@ -1,4 +1,5 @@
-<img width="376" alt="polvo" src="https://github.com/user-attachments/assets/853b0bca-a42d-4b1f-b6a9-efb7a8891da6" />
+<img width="380" alt="Imagem PNG" src="https://github.com/user-attachments/assets/64e4315d-2d68-43ff-89c3-c28cd7dab5cd" />
+
 
 
 
