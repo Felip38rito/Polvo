@@ -39,7 +39,7 @@ In modern AI workflows, you typically face a lose-lose trade-off:
 Install Polvo with a single command (macOS and Linux):
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Felip38rito/Polvo/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Felip38rito/Polvo/stable/install.sh | sh
 ```
 
 The installer bootstraps `uv`, clones the repo into `~/.polvo`, installs the `polvo` CLI globally, and sets up the background service via `launchd` (macOS) or `systemd` (Linux).
