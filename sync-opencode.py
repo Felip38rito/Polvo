@@ -51,6 +51,7 @@ import sys
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+import re
 
 # Default human-friendly label per tier, used when the router doesn't give us a
 # nicer display name. The upstream api id is always appended for clarity.
@@ -128,7 +129,7 @@ def _strip_trailing_commas(text: str) -> str:
     import re
 
     # Replace ',' followed (after whitespace) by ] or } with just that closer.
-    return re.sub(r",(\s*[\]}])", r"\1", text)
+    return re.sub(r",(\s*[\\]}])", r"\1", text)
 
 
 def parse_jsonc(text: str):
@@ -313,12 +314,10 @@ def render_models_value(block: dict, indent: str) -> str:
 
 
 def sync_config(text: str, models: list[dict], dry_run: bool = False) -> tuple[str, bool, str]:
-    """Rewrite the router provider's models VALUE. Returns (new_text, changed, summary).
+    """Rewrite the router provider's models VALUE and ensure default model is 'adaptive'. Returns (new_text, changed, summary).
 
-    Non-destructive: locates the `router` provider, then within it replaces
-    only the *value* of the `"models"` key. Everything else in the file —
-    the `"models":` key itself, the rest of the router provider, and all other
-    providers/top-level keys — is preserved byte-for-byte.
+    Non-destructive: locates the `router` provider, ensures it has "model": "adaptive",
+    and replaces only the *value* of the "models" key. Everything else is preserved byte-for-byte.
     """
     block = build_models_block(models)
 
@@ -330,23 +329,41 @@ def sync_config(text: str, models: list[dict], dry_run: bool = False) -> tuple[s
     pstart, pend = prov_span
     obj_text = text[pstart:pend]
 
-    # Locate the existing "models" key inside the router provider.
+    # 1. Ensure "model": "adaptive" is set
+    model_block = _find_key_block(obj_text, "model")
+    if model_block:
+        mstart, mend = model_block
+        if obj_text[mstart:mend].strip() != '"adaptive"':
+            obj_text = obj_text[:mstart] + '"adaptive"' + obj_text[mend:]
+    else:
+        # Insert it after the opening brace.
+        brace_pos = obj_text.find('{')
+        # Sniff indent from the next line if possible
+        next_nl = obj_text.find('\n', brace_pos)
+        indent = "  "
+        if next_nl != -1:
+            line_after = obj_text[next_nl+1:]
+            match = re.match(r'^(\s+)', line_after)
+            if match:
+                indent = match.group(1)
+        
+        insertion = f'\n{indent}"model": "adaptive",'
+        obj_text = obj_text[:brace_pos+1] + insertion + obj_text[brace_pos+1:]
+
+    # 2. Locate and rewrite the "models" block
     existing = _find_key_block(obj_text, "models")
     if existing is None:
         summary = "router provider has no models block — not modifying (run manually)"
         return text, False, summary
 
     vstart, vend = existing
-    old_value = obj_text[vstart:vend]
-    # Indent of the value's first line: the "models" key indent + 2 spaces.
     key_line_indent = _indent_of(obj_text, vstart)
-    # The key and value live on the same line ("    \"models\": {"), so the
-    # value's body is indented key_indent + 2 spaces.
     value_indent = " " * (len(key_line_indent) + 2)
     new_value = render_models_value(block, value_indent)
+    
     new_obj = obj_text[:vstart] + new_value + obj_text[vend:]
-    changed = new_obj != obj_text
-    summary = "models block updated" if changed else "models block already in sync"
+    changed = new_obj != text[pstart:pend]
+    summary = "models block updated and default model set to adaptive" if changed else "models block already in sync"
     return text[:pstart] + new_obj + text[pend:], changed, summary
 
 
@@ -376,6 +393,7 @@ def main() -> int:
                 PROVIDER_NAME: {
                     "npm": "@ai-sdk/openai-compatible",
                     "name": "Model Router (local)",
+                    "model": "adaptive",
                     "options": {
                         "baseURL": args.router_url,
                         "apiKey": "router",

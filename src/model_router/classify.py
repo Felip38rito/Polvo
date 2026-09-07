@@ -28,7 +28,7 @@ from .models import RouterModels
 log = logging.getLogger("model_router.classify")
 
 # Classification is on the critical path of every request, so keep the upstream
-# call fast: a short total timeout with a couple of quick retries on transient
+# call fast: a short total timeout with a couple of quick retries to transient
 # failures is better than letting each request hang for 30s before falling back.
 _CLASSIFY_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
 # max_tokens must leave headroom for the JSON decision even if the model emits a
@@ -94,14 +94,17 @@ def build_llm_system(models: "RouterModels") -> str:
     )
     return f"""You are a model router. Pick the most appropriate model tier for the user's request.
 
-Reply with ONLY a single JSON object, no commentary, of the form {{"model": "<tier>", "reason": "<short>"}}.
+Reply with ONLY a single JSON object, no commentary, no preamble, no markdown blocks. 
+If you add any text outside the JSON, the system will fail.
+
+Format: {{"model": "<tier>", "reason": "<short>"}}
 
 Tier definitions:
 {tier_lines}
 
 Decide by what EXECUTING the request requires, using this escalation axis:
 1. mini -> air: file scope. Single-file/mechanical work stays in mini; multi-file features and routine integrations move to air.
-2, air -> pro: clarity of path. If the implementation path is clear, it stays in air; if the solution must be discovered (analysis, debugging, design), it escalates to pro.
+2. air -> pro: clarity of path. If the implementation path is clear, it stays in air; if the solution must be discovered (analysis, debugging, design), it escalates to pro.
 3. pro -> ultra: scope. A hard but contained problem stays in pro; only whole-system synthesis or "impossible" problems reach ultra.
 
 Examples:

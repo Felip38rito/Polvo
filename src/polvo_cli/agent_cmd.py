@@ -2,6 +2,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -24,6 +25,43 @@ def _run_cmd(args: list[str], cwd: str | None = None) -> bool:
         return res.returncode == 0
     except FileNotFoundError:
         return False
+
+
+def _ensure_shell_source() -> bool:
+    """Ensure the user's shell profile sources ~/.polvo/.env.
+
+    Returns True when the profile is (or now is) configured; False when no
+    profile could be detected (the user must add the line manually).
+    """
+    shell = os.environ.get("SHELL", "")
+    profile_path = None
+    if "zsh" in shell:
+        profile_path = Path.home() / ".zshrc"
+    elif "bash" in shell:
+        profile_path = Path.home() / ".bashrc"
+
+    if not profile_path or not profile_path.exists():
+        profile_path = Path.home() / ".zshrc"
+        if not profile_path.exists():
+            err_console.print("[red]Could not detect shell profile (.zshrc/.bashrc).[/red]")
+            console.print(f"Please add this line to your shell config: [bold]source ~/.polvo/.env[/bold]")
+            return False
+
+    source_line = "source ~/.polvo/.env"
+    try:
+        content = profile_path.read_text()
+        if source_line not in content:
+            with open(profile_path, "a") as f:
+                f.write(f"\n# Polvo environment variables\n{source_line}\n")
+            console.print(f"[bold green]✅ Added source marker to {profile_path}[/bold green]")
+        else:
+            console.print("[bold green]✅ Shell profile already configured to source .polvo/.env[/bold green]")
+
+        console.print(f"\n[bold yellow]IMPORTANT:[/bold yellow] Please run [bold]source {profile_path}[/bold] or restart your terminal.")
+        return True
+    except Exception as e:
+        err_console.print(f"[red]Failed to update shell profile: {e}[/red]")
+        raise typer.Exit(code=1)
 
 
 def setup_hermes() -> None:
@@ -87,9 +125,13 @@ def setup_opencode() -> None:
 def setup_codex() -> None:
     """Automated setup for Codex CLI to use Polvo."""
     port = core.load_env_var("ROUTER_PORT", "9000")
+    api_key = core.load_env_var("ROUTER_API_KEY", "router")
     console.print(
         Panel(f"[bold cyan]Codex CLI Setup[/bold cyan]\nConfiguring Codex to route through Polvo on port {port}.\n")
     )
+
+    # Write POLVO_API_KEY so Codex (env_key = "POLVO_API_KEY") can authenticate.
+    core.save_env_key("POLVO_API_KEY", api_key)
 
     try:
         codex_config.write_codex_config(port)
@@ -100,6 +142,9 @@ def setup_codex() -> None:
     except Exception as e:
         err_console.print(f"[red]Unexpected error configuring Codex: {e}[/red]")
         raise typer.Exit(code=1)
+
+    # Ensure the user's shell sources ~/.polvo/.env so POLVO_API_KEY is in scope.
+    _ensure_shell_source()
 
 
 def setup_copilot() -> None:
@@ -117,40 +162,92 @@ def setup_copilot() -> None:
         "COPILOT_PROVIDER_BASE_URL": api_url,
         "COPILOT_PROVIDER_API_KEY": api_key,
         "COPILOT_MODEL": "adaptive",
+        "ROUTER_API_KEY": api_key,
     }
     
     for var, val in copilot_vars.items():
         core.save_env_key(var, val)
 
     # 2. Add the source marker to the shell profile
-    shell = os.environ.get("SHELL", "")
-    profile_path = None
-    if "zsh" in shell:
-        profile_path = Path.home() / ".zshrc"
-    elif "bash" in shell:
-        profile_path = Path.home() / ".bashrc"
-    
-    if not profile_path or not profile_path.exists():
-        profile_path = Path.home() / ".zshrc"
-        if not profile_path.exists():
-            err_console.print("[red]Could not detect shell profile (.zshrc/.bashrc).[/red]")
-            console.print(f"Please add this line to your shell config: [bold]source ~/.polvo/.env[/bold]")
-            return
+    if not _ensure_shell_source():
+        return
 
-    source_line = "source ~/.polvo/.env"
-    try:
-        content = profile_path.read_text()
-        if source_line not in content:
-            with open(profile_path, "a") as f:
-                f.write(f"\n# Polvo environment variables\n{source_line}\n")
-            console.print(f"[bold green]✅ Added source marker to {profile_path}[/bold green]")
-        else:
-            console.print("[bold green]✅ Shell profile already configured to source .polvo/.env[/bold green]")
-        
-        console.print(f"\n[bold yellow]IMPORTANT:[/bold yellow] Please run [bold]source {profile_path}[/bold] or restart your terminal.")
-    except Exception as e:
-        err_console.print(f"[red]Failed to update shell profile: {e}[/red]")
-        raise typer.Exit(code=1)
+_CLAUDE_ENV_KEYS = (
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_MODEL",
+)
+
+
+def _warn_claude_settings_conflicts() -> None:
+    """Warn about Claude Code settings files whose 'env' block sets router
+    variables: settings-file env overrides the shell environment, so a stale
+    value there would silently win over the Polvo setup."""
+    candidates = [
+        Path.home() / ".claude" / "settings.json",
+        Path.cwd() / ".claude" / "settings.json",
+        Path.cwd() / ".claude" / "settings.local.json",
+    ]
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text()) if path.exists() else {}
+        except (OSError, ValueError):
+            continue
+        env = data.get("env") or {}
+        hits = sorted(set(env) & set(_CLAUDE_ENV_KEYS))
+        if hits:
+            err_console.print(
+                f"[yellow]⚠ {path} sets {', '.join(hits)} in its 'env' block — those values"
+                " override the shell environment. Remove them or the Polvo setup won't take effect.[/yellow]"
+            )
+
+
+def setup_claude_code(context_tokens: int | None = None) -> None:
+    """Automated setup for Claude Code CLI to use Polvo via ~/.polvo/.env."""
+    port = core.load_env_var("ROUTER_PORT", "9000")
+    api_key = core.load_env_var("ROUTER_API_KEY", "router")
+    # NOTE: no '/v1' suffix. The Claude Code client appends /v1/messages to
+    # ANTHROPIC_BASE_URL — a trailing /v1 would produce /v1/v1/messages.
+    base_url = f"http://127.0.0.1:{port}"
+
+    console.print(
+        Panel(f"[bold cyan]Claude Code Setup[/bold cyan]\nConfiguring Claude Code to route through Polvo on port {port}.\n")
+    )
+
+    claude_vars = {
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_MODEL": "adaptive",
+        # Adaptive Scale tiers as Anthropic model aliases: haiku-class work
+        # (incl. background/subagent tasks) -> mini, sonnet -> pro, opus -> ultra.
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mini",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "pro",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "ultra",
+        # Only model traffic goes to the gateway: no telemetry/updates checks.
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    }
+    if context_tokens:
+        claude_vars["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(context_tokens)
+
+    for var, val in claude_vars.items():
+        core.save_env_key(var, val)
+
+    _warn_claude_settings_conflicts()
+
+    if not _ensure_shell_source():
+        return
+
+    console.print(f"\n[bold green]✅ Claude Code configured to route through Polvo![/bold green]")
+    console.print(
+        f"Run [bold]claude[/bold] in a new terminal and check [bold]/status[/bold] —"
+        f" the Anthropic base URL must point at 127.0.0.1:{port}."
+    )
+    console.print(
+        "[dim]Note: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC disables CLI auto-updates —"
+        " update claude manually (e.g. via your package manager).[/dim]"
+    )
+
 
 agent_app = typer.Typer(
     help="Automate the setup of agents to use Polvo as their model provider.",
@@ -175,3 +272,13 @@ def agent_codex() -> None:
 def agent_copilot() -> None:
     """Setup Polvo for Copilot CLI."""
     setup_copilot()
+
+@agent_app.command("claude")
+def agent_claude(
+    context_tokens: int | None = typer.Option(
+        None, "--context-tokens",
+        help="Context window (tokens) of the smallest tier — sets CLAUDE_CODE_MAX_CONTEXT_TOKENS so compaction works with unknown model ids.",
+    ),
+) -> None:
+    """Setup Polvo for Claude Code."""
+    setup_claude_code(context_tokens)
