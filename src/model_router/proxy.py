@@ -390,8 +390,11 @@ async def messages_shim(request: Request):
 
     try:
         chat_body = anthropic_translate.translate_request(body)
-        # Force 'adaptive' for all Claude Code requests to override client-side model persistence.
-        chat_body["model"] = "adaptive"
+        # Force 'adaptive' for all Claude Code requests to override client-side model persistence,
+        # unless the requested model is already a known tier or custom model alias.
+        original_model = body.get("model", "")
+        if settings.models.tier_for_alias(original_model) is None:
+            chat_body["model"] = "adaptive"
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         return _anthropic_error_response(400, f"Invalid Anthropic request: {exc}")
 

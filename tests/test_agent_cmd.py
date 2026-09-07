@@ -105,12 +105,13 @@ def test_setup_copilot_writes_to_env(monkeypatch):
             with patch("polvo_cli.core.save_env_key") as mock_save_env:
                 agent_cmd.setup_copilot()
                 
-                # Verify all 3 Copilot vars were saved to .env
-                assert mock_save_env.call_count == 3
+                # Verify all 4 Copilot vars were saved to .env
+                assert mock_save_env.call_count == 4
                 saved_vars = [call.args[0] for call in mock_save_env.call_args_list]
                 assert "COPILOT_PROVIDER_BASE_URL" in saved_vars
                 assert "COPILOT_PROVIDER_API_KEY" in saved_vars
                 assert "COPILOT_MODEL" in saved_vars
+                assert "ROUTER_API_KEY" in saved_vars
                 
                 # Verify shell profile was modified
                 mock_open.assert_called()
