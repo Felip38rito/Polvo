@@ -94,41 +94,41 @@ default_tier: air
 
 # Upstream endpoints
 providers:
-  default:
+  ollama-cloud:
     base_url: https://ollama.com/v1
-    api_key_env: OLLAMA_API_KEY
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
+    api_key_env: OLLAMA_CLOUD_API_KEY
+  open-router:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPEN_ROUTER_API_KEY
 
 # The Adaptive Scale (Fixed keys: mini, air, pro, ultra)
 adaptive:
   mini:
-    model: gemma4:31b
+    model: gemma4:cloud
     description: "trivial/mechanical"
-    provider: default
+    provider: ollama-cloud
   air:
-    model: deepseek-v4-flash:0731
+    model: deepseek-v4-flash:cloud
     description: "day-to-day"
-    provider: default
+    provider: ollama-cloud
   pro:
-    model: gpt-4o
+    model: minimax-m3:cloud
     description: "complex reasoning"
-    provider: openai
+    provider: ollama-cloud
   ultra:
-    model: claude-3-7-sonnet-latest
+    model: glm-5.3
     description: "deep synthesis"
-    provider: openai
+    provider: ollama-cloud
 
 # Custom models (not used by classifier, routable by explicit ID)
 custom:
   experimental-model:
     model: some-api-id
-    provider: default
+    provider: ollama-cloud
 
 classifier:
-  model: gemma4:31b
-  provider: default
+  model: gemma4:cloud
+  provider: ollama-cloud
   min_classify_len: 10
 ```
 
