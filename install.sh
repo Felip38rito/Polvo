@@ -106,6 +106,22 @@ install_service() {
     polvo install --port "$PORT"
 }
 
+# Interactive configuration of providers/tiers/adapters
+prompt_setup() {
+    # If stdout/stdin is interactive, guide the user to configure Polvo
+    if [[ -t 0 ]]; then
+        echo
+        log "Would you like to configure your providers, tiers and agent adapters now?"
+        echo -n -e "\033[1;32m[INFO]\033[0m Run interactive setup? [Y/n]: "
+        read -r run_cfg || run_cfg="y"
+        if [[ -z "$run_cfg" || "$run_cfg" =~ ^[Yy]$ ]]; then
+            polvo || true
+        else
+            log "Skipping interactive setup. You can run 'polvo' at any time."
+        fi
+    fi
+}
+
 main() {
     parse_args "$@"
     prompt_port
@@ -115,6 +131,7 @@ main() {
     setup_repo
     install_cli
     install_service
+    prompt_setup
     
     echo
     echo "=================================================="
@@ -126,10 +143,11 @@ main() {
     echo " Service:    $([ $NO_SERVICE = true ] && echo 'not installed (--no-service)' || echo 'installed and running')"
     echo
     echo " Usage:"
+    echo "   polvo           - Guided configuration (providers, tiers)"
+    echo "   polvo agent     - Configure adapters (claude, copilot, hermes, codex, opencode)"
     echo "   polvo status    - Check service status"
     echo "   polvo restart   - Restart service"
     echo "   polvo logs      - View logs"
-    echo "   polvo setup     - Interactive configuration"
     echo "=================================================="
 }
 
