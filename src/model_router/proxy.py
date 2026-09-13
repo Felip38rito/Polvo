@@ -229,7 +229,11 @@ async def _process_chat(
     )
 
     upstream_body = dict(body)
-    upstream_body.update(routed_spec.extra_params)  # Merge reasoning/sampling params
+    # Tier extra_params apply as DEFAULTS only — a key the client explicitly
+    # sent (e.g. reasoning_effort) must win over the tier's YAML value, so
+    # clients keep control of their own reasoning budget.
+    for key, value in routed_spec.extra_params.items():
+        upstream_body.setdefault(key, value)
     upstream_body["model"] = routed_model
 
     target_url = f"{provider.base_url}/chat/completions"

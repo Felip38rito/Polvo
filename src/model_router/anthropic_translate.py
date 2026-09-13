@@ -210,6 +210,24 @@ def translate_request(body: dict[str, Any]) -> dict[str, Any]:
     if tool_choice is not None:
         out["tool_choice"] = tool_choice
 
+    # An explicit client-sent reasoning_effort passes through untouched;
+    # the thinking-budget mapping below only applies when absent.
+    if body.get("reasoning_effort"):
+        out["reasoning_effort"] = body["reasoning_effort"]
+
+    # Extended thinking: map the client's thinking budget to an upstream
+    # reasoning_effort the tier's model understands (ollama-cloud honors
+    # reasoning_effort). An explicit client-sent reasoning_effort wins.
+    thinking = body.get("thinking") or {}
+    if thinking.get("type") == "enabled" and "reasoning_effort" not in body:
+        budget = thinking.get("budget_tokens") or 0
+        if budget < 2048:
+            out["reasoning_effort"] = "low"
+        elif budget < 8192:
+            out["reasoning_effort"] = "medium"
+        else:
+            out["reasoning_effort"] = "high"
+
     return out
 
 
@@ -268,6 +286,11 @@ def translate_non_stream(chat_completion: dict[str, Any], model: str) -> dict[st
     text = message.get("content")
     if isinstance(text, list):
         text = _content_to_text(text)
+    # Preserve the model's chain-of-thought as a thinking block (Claude Code
+    # renders these natively). Upstreams call it reasoning or reasoning_content.
+    reasoning = message.get("reasoning") or message.get("reasoning_content")
+    if reasoning:
+        content.append({"type": "thinking", "thinking": reasoning, "signature": "polvo"})
     if text:
         content.append({"type": "text", "text": text})
     for tc in message.get("tool_calls") or []:
@@ -382,6 +405,8 @@ async def translate_stream(
         nonlocal current, next_block
         if kind == "text":
             block: dict[str, Any] = {"type": "text", "text": ""}
+        elif kind == "thinking":
+            block = {"type": "thinking", "thinking": "", "signature": ""}
         else:
             block = {
                 "type": "tool_use",
@@ -455,6 +480,22 @@ async def translate_stream(
             continue
         choice = choices[0]
         delta = choice.get("delta") or {}
+
+        # ---- reasoning -> thinking block (before tools/text) ----
+        reasoning_piece = delta.get("reasoning") or delta.get("reasoning_content")
+        if reasoning_piece:
+            if current is None:
+                yield open_block("thinking")
+            elif current["kind"] != "thinking":
+                yield close_block()
+                yield open_block("thinking")
+            assert current is not None  # assigned by open_block() above
+            current["text"] += reasoning_piece
+            yield _sse("content_block_delta", {
+                "type": "content_block_delta",
+                "index": current["block_index"],
+                "delta": {"type": "thinking_delta", "thinking": reasoning_piece},
+            })
 
         # ---- tool calls (arguments may be fragmented across chunks) ----
         for tc in delta.get("tool_calls") or []:
