@@ -548,6 +548,36 @@ def test_responses_shim_translates(client: TestClient, monkeypatch):
     ]
 
 
+def test_responses_shim_tool_continuation_floor(client: TestClient, monkeypatch):
+    """Tool continuations in /v1/responses should not degrade to mini."""
+    seen = {}
+
+    async def fake_post(self, url, headers, **kw):
+        seen["body"] = kw["json"]
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    payload = {
+        "model": "adaptive",
+        "instructions": "Be helpful.",
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Debug why it failed"}]},
+            {"type": "function_call", "call_id": "call_1", "name": "read_file", "arguments": "{\"path\":\"install.sh\"}"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "echo hello"},
+        ],
+        "tools": [{"name": "read_file", "description": "read a file", "parameters": {}}],
+    }
+    r = client.post("/v1/responses", json=payload)
+    assert r.status_code == 200
+    # Must be air (or higher), not mini
+    assert r.headers["X-Router-Tier"] == "air"
+    assert seen["body"]["model"] == "deepseek-v4-flash:0731"
+
+
 def test_responses_shim_invalid_json_400(client: TestClient):
     r = client.post("/v1/responses", content="nope", headers={"Content-Type": "application/json"})
     assert r.status_code == 400

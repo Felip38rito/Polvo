@@ -146,10 +146,18 @@ async def _process_chat(
     if not isinstance(messages, list) or not messages:
         raise HTTPException(status_code=400, detail="'messages' must be a non-empty list")
 
-    # Classify ONLY the LAST user message — the user's current intent.
+    # Extract user prompts from messages to determine intent.
+    # We look for the last user message to capture the user's intent.
     last_user_content: str | None = None
+    has_tool_interactions = bool(body.get("tools"))
     for msg in messages:
-        if msg.get("role") != "user":
+        role = msg.get("role")
+        if role in ("tool", "function"):
+            has_tool_interactions = True
+        elif role == "assistant" and msg.get("tool_calls"):
+            has_tool_interactions = True
+
+        if role != "user":
             continue
         content = msg.get("content")
         if isinstance(content, str):
@@ -166,18 +174,9 @@ async def _process_chat(
     if last_user_content is not None:
         prompt = last_user_content
     else:
-        # No user message (e.g. a tool-call continuation: system + assistant +
-        # tool). Classify by the last NON-system message so the system prompt
-        # never leaks into the classifier. If only a system message exists,
-        # there is nothing meaningful to classify — fall back to the default.
-        parts: list[str] = []
-        for msg in messages:
-            if msg.get("role") == "system":
-                continue
-            content = msg.get("content")
-            if isinstance(content, str):
-                parts.append(content)
-        prompt = "\n".join(parts) if parts else ""
+        # If there are no user messages at all (e.g. initial system-only or raw tool continuation
+        # without user turn), don't send raw tool outputs or system text to the classifier.
+        prompt = ""
 
     # Sanitize prompt to remove Claude Code metadata and noise that confuse the classifier
     import re
@@ -206,6 +205,15 @@ async def _process_chat(
                 detail=f"Unknown model '{requested_model}'. No adaptive tiers configured; request a custom model by id.",
             )
         routed_tier = await classify(prompt, settings)
+
+    # Tool calling floor: if request uses tools or is in an active responses-shim tool-loop,
+    # don't allow falling down to 'mini' (lightweight models that fail tool continuations).
+    if responses_mode and has_tool_interactions and routed_tier == "mini":
+        # Escalate to 'air' if available, otherwise keep default/available tier.
+        if "air" in settings.models.tiers:
+            routed_tier = "air"
+        elif settings.models.default_tier and settings.models.default_tier != "mini":
+            routed_tier = settings.models.default_tier
 
     routed_spec = settings.models.tiers[routed_tier]
     routed_model = routed_spec.api_id
